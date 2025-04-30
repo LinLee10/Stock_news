@@ -1,0 +1,11 @@
+feedparser
+requests
+beautifulsoup4
+transformers
+torch
+yfinance
+pandas
+matplotlib
+scikit-learn
+python-dotenv
+xgboost

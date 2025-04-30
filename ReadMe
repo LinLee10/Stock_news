@@ -1,0 +1,10 @@
+Right now, your project is structured correctly — but the data feeding into your model is broken early on, and the error is being silently hidden. In train_and_forecast, when you merge your stock price data with market and peer prices (and optionally sentiment), if anything goes slightly wrong (like a mismatch in date formats, missing columns, timezone errors), your code catches the error but does not log it, and simply returns an empty forecast. So your model never actually gets to training or predicting — it just quietly says "okay, forecast is empty" and moves on. This is why you always get no orange prediction line, no confidence, and no meaningful forecasts.
+
+The second layer of the problem is that even when your data pulls in, your dates are mismatched — some of your stock data dates are timezone-aware (UTC), while your sentiment data (and scraped news dates) are plain naive dates. When you try to align them in a model feature matrix, the merge silently fails or results in an empty dataset. As a result, your Random Forest and XGBoost models are training on either junk or nothing at all.
+
+Because you built robust, multi-step forecasts that depend on the last trained models, once training fails, everything downstream (3-day prediction, orange line, confidence score) naturally fails too — but your graphs still render with only the historical line because plotting historical prices doesn’t require a model prediction.
+
+✅ The code logic and pipeline design you built is good.
+❌ But the data inputs are broken in a subtle way (silent errors and date misalignment).
+
+Once you expose the real training error (remove blanket try/except), standardize all dates, and confirm models are training on actual data, the system will work and the orange line + confidence scoring will appear as intended.
