@@ -1,61 +1,64 @@
-# retrain.py
-
+#!/usr/bin/env python3
 import os
-import joblib
 import pandas as pd
-from news_scraper import scrape_and_score_news
-from prediction import fetch_price_history, train_and_forecast
+import logging
+import joblib
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from sklearn.model_selection import train_test_split
+import schedule
+import time
 
-# Directory to save models
-MODEL_DIR = "models"
-os.makedirs(MODEL_DIR, exist_ok=True)
+# ─── Logging Setup ─────────────────────────────────────
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
-def weekly_retrain(
-    portfolio_csv: str = "data/portfolio.csv",
-    watch_csv: str     = "data/watchlist.csv"
-):
+# ─── Model Retraining Function ─────────────────────────
+def retrain_models():
     """
-    Retrain RF+XGB ensemble on the past 90 days for each ticker
-    in portfolio & watchlist, and save model+params to disk.
+    Retrain RF + XGB on each ticker’s full history and overwrite model files.
     """
-    # 1) Load tickers
-    pf = pd.read_csv(portfolio_csv)["Ticker"].tolist()
-    wl = pd.read_csv(watch_csv)["Ticker"].tolist()
-    all_tickers = sorted(set(pf + wl))
+    tickers = ['AAPL', 'MSFT']  # ← add all your tickers here
+    model_dir = 'models'
+    os.makedirs(model_dir, exist_ok=True)
 
-    # 2) Scrape sentiment for past 90 days
-    news_df = scrape_and_score_news(all_tickers)
+    for ticker in tickers:
+        try:
+            df = pd.read_csv(f'data/{ticker}.csv', parse_dates=['Date'])
+            df['dayofyear'] = df['Date'].dt.dayofyear
 
-    # 3) For each ticker: fetch data, train, and save
-    market_df = fetch_price_history("SPY", period="90d")
-    peer_df   = fetch_price_history("QQQ", period="90d")
-
-    for tic in all_tickers:
-        print(f"Retraining model for {tic}...")
-        hist = fetch_price_history(tic, period="90d")
-        # Build sentiment_series for this ticker
-        sub = news_df[news_df["Ticker"]==tic][["Date","Score"]]
-        if sub.empty:
-            sent_ser = None
-        else:
-            sent_ser = pd.Series(
-                sub["Score"].values,
-                index=pd.to_datetime(sub["Date"])
+            X = df[['dayofyear']]
+            y = df['Close']
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
             )
 
-        # Train & ignore output
-        _, _, _ = train_and_forecast(
-            tic, hist, market_df, peer_df, sent_ser
-        )
+            rf  = RandomForestRegressor(n_estimators=100, random_state=42)
+            xgb = XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
+            rf .fit(X_train, y_train)
+            xgb.fit(X_train, y_train)
 
-        # Save the raw model objects if needed (RF/XGB) separately:
-        # We didn't return them, but you could modify train_and_forecast
-        # to return them alongside forecasts if you wish to persist.
+            joblib.dump(rf , os.path.join(model_dir, f"rf_{ticker}.pkl"))
+            joblib.dump(xgb, os.path.join(model_dir, f"xgb_{ticker}.pkl"))
 
-        # Instead, as a stub, we log the retrain
-        print(f"  -> Completed retraining for {tic}.")
+            logging.info(f"Retrained models for {ticker}")
+        except Exception:
+            logging.exception(f"Failed retraining for {ticker}")
 
-    print("Weekly retraining complete.")
+    # Optional: after retrain, update any actual-price fillings
+    try:
+        from prediction import update_actual_prices
+        update_actual_prices()
+    except Exception:
+        logging.exception("Failed to update actual prices after retraining")
+
+# ─── Scheduler Setup ────────────────────────────────────
+schedule.every().monday.at("00:00").do(retrain_models)
+logging.info("Scheduled weekly retraining every Monday at 00:00")
 
 if __name__ == "__main__":
-    weekly_retrain()
+    # Run once at startup
+    retrain_models()
+    # Then enter the loop
+    while True:
+        schedule.run_pending()
+        time.sleep(60)

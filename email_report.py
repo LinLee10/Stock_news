@@ -5,7 +5,7 @@ from email.mime.image import MIMEImage
 import smtplib
 from dotenv import load_dotenv
 
-def send_email_report(subject: str, html_body: str, attachments: list[str]):
+def send_report(subject: str, html_body: str, attachments: list[str]):
     """
     Sends an HTML email with the given subject and body,
     attaching each file in `attachments`.

@@ -1,19 +1,842 @@
-Date,Ticker,Avg_Sentiment,Count_Positive,Count_Negative,Count_Neutral,Headlines
-2025-04-24,AAPL,-0.1,5,9,26,40
-2025-04-24,ADI,0.025,10,9,21,40
-2025-04-24,AMZN,-0.15,7,13,20,40
-2025-04-24,ARM,-0.15,6,12,22,40
-2025-04-24,GOOGL,0.15,9,3,28,40
-2025-04-24,LLY,0.1,10,6,24,40
-2025-04-24,META,-0.25,2,12,26,40
-2025-04-24,MRVL,-0.15,9,15,16,40
-2025-04-24,MSFT,0.025,6,5,29,40
-2025-04-24,NVDA,0.0,4,4,22,30
-2025-04-24,NVMI,0.175,12,5,23,40
-2025-04-24,PFE,-0.175,3,10,27,40
-2025-04-24,RTX,-0.15,7,13,20,40
-2025-04-24,SMCI,-0.125,9,14,17,40
-2025-04-24,SOFI,0.025,9,8,23,40
-2025-04-24,SRAD,0.175,12,5,23,40
-2025-04-24,TSLA,-0.15,9,15,16,40
-2025-04-24,UUUU,-0.125,5,10,25,40
+Date,Headline,Label,Score,Ticker
+2025-04-23,$MRVL stock is up 6% today. Here's what we see in our data. - Nasdaq,neutral,0.0,MRVL
+2025-04-16,Is Marvell Technology Inc. (NASDAQ:MRVL) the Best NASDAQ Stock to Buy So Far in 2025? - Yahoo Finance,positive,0.6369,MRVL
+2025-04-30,"Why Marvell Technology, Inc. (MRVL) is Among the Best Oversold NASDAQ Stocks to Buy Right Now - MSN",positive,0.6369,MRVL
+2025-04-21,"Marvell Technology: Shares Plunge, But Operating Momentum Accelerates (NASDAQ:MRVL) - Seeking Alpha",positive,0.1531,MRVL
+2025-04-28,Marvell Technology (MRVL) Stock Sinks As Market Gains: Here's Why - Nasdaq,positive,0.34,MRVL
+2025-04-10,Marvell (MRVL) Stock Jumps 21.9%: Will It Continue to Soar? - Yahoo Finance,neutral,0.0,MRVL
+2025-04-13,Is Marvell Technology Inc. (NASDAQ:MRVL) a NASDAQ Stock with the Highest Upside Potential? - Insider Monkey,neutral,0.0,MRVL
+2025-04-25,Is Marvell Technology Inc. (NASDAQ:MRVL) the Most Promising Stock According to Analysts? - Yahoo Finance,positive,0.4576,MRVL
+2025-03-31,Marvell Technology (NasdaqGS:MRVL) Unveils Groundbreaking 400G Technology Amid Recent 15% Share Price Dip - Yahoo Finance,positive,0.296,MRVL
+2025-04-08,Why Marvell Technology (MRVL) Dipped More Than Broader Market Today - Yahoo Finance,neutral,0.0,MRVL
+2025-04-19,"Marvell Technology, Inc. (MRVL) Sees AI Chip Outlook Dim as Tariff Fears Grow - Yahoo Finance",negative,-0.4215,MRVL
+2025-04-24,CRDO vs. MRVL: Which AI-focused Semiconductor Stock is the Better Buy? - Yahoo Finance,positive,0.4404,MRVL
+2025-03-26,Why Marvell Technology (MRVL) Stock Is Nosediving - Yahoo Finance,neutral,0.0,MRVL
+2025-04-14,"Marvell Technology, Inc. (MRVL): AI Demand Cuts Drive Target Drop Amid ASIC Forecast Reductions - Yahoo Finance",negative,-0.5859,MRVL
+2025-04-23,Is Marvell Technology Inc. (NASDAQ:MRVL) the Best Stock Under $100 to Buy According to Hedge Funds? - Yahoo Finance,positive,0.6369,MRVL
+2025-04-17,Marvell Technology (MRVL) Stock Drops Despite Market Gains: Important Facts to Note - Yahoo Finance,negative,-0.3875,MRVL
+2025-03-06,Why Marvell Technology (MRVL) Shares Are Falling Today - Yahoo Finance,positive,0.1531,MRVL
+2025-04-17,"Marvell Technology, Inc. (NASDAQ:MRVL) Shares Slammed 26% But Getting In Cheap Might Be Difficult Regardless - simplywall.st",negative,-0.3919,MRVL
+2025-04-23,Wall St. Scopes Marvell Technology (MRVL) as a Prime Buy-the-Dip Candidate - markets.businessinsider.com,neutral,0.0,MRVL
+2025-04-16,3 Reasons Growth Investors Will Love Marvell (MRVL) - Yahoo Finance,positive,0.7783,MRVL
+2025-03-20,Why Marvell Technology Inc (MRVL) Is Plunging In 2025? - Yahoo Finance,neutral,0.0,MRVL
+2025-04-04,"Marvell Technology, Inc. (MRVL) – Jim Cramer Sees Opportunity: ‘Historic Decline, But Time to Buy!’ - Yahoo Finance",positive,0.2942,MRVL
+2025-03-08,"Is Marvell Technology, Inc. (MRVL) the Best Growth Stock Under $100 to Buy Now? - Yahoo Finance",positive,0.7783,MRVL
+2025-04-11,Why Marvell Technology Inc. (MRVL) Went Down On Thursday? - Yahoo Finance,neutral,0.0,MRVL
+2025-04-02,Here's Why Marvell Technology (MRVL) is a Strong Growth Stock - Yahoo Finance,positive,0.7096,MRVL
+2025-04-18,Wall Street Analysts Think Marvell (MRVL) Is a Good Investment: Is It? - Yahoo Finance,positive,0.4404,MRVL
+2025-04-02,Here's Why Marvell Technology (MRVL) is a Strong Growth Stock - Nasdaq,positive,0.7096,MRVL
+2025-03-24,Bullish Wall St. Analyst Eyes 80% Upside for Marvell Stock (MRVL) - TipRanks,neutral,0.0,MRVL
+2025-04-03,"Marvell Technology, Inc. (MRVL) is Attracting Investor Attention: Here is What You Should Know - Yahoo Finance",positive,0.4767,MRVL
+2025-04-10,"Marvell (MRVL) Streamlines for the AI Era – Auto Exit, Data Center Push - Yahoo Finance",neutral,0.0,MRVL
+2025-04-13,Marvell Technology (MRVL) Faces Debt Challenges Amid Earnings Lo - GuruFocus,negative,-0.296,MRVL
+2025-03-17,Is Marvell Technology (MRVL) the Best Data Center Stock to Buy According to Billionaires? - Yahoo Finance,positive,0.6369,MRVL
+2025-04-04,Marvell (MRVL) Down 23% Since Last Earnings Report: Can It Rebound? - Yahoo Finance,neutral,0.0,MRVL
+2025-03-14,"Is Marvell Technology, Inc. (MRVL) The Top Beaten Down Large Cap Stock That Can Double According To Wall Street? - Yahoo Finance",negative,-0.25,MRVL
+2025-03-13,Here’s Why Marvell Technology (MRVL) Surged in Q4 - Yahoo Finance,neutral,0.0,MRVL
+2025-03-18,Jim Cramer Thinks Marvell Technology (MRVL) Deserves a Higher Stock Price Amid AI Revenue - Yahoo Finance,neutral,0.0,MRVL
+2025-03-19,Is Marvell Technology (MRVL) One of the Stocks to Buy with Exponential Growth in 2025? - Yahoo Finance,positive,0.3818,MRVL
+2025-04-04,MRVL Stock Plummets Amid Semiconductor Sell-off - GuruFocus,neutral,0.0,MRVL
+2025-03-22,Marvell Technology (NasdaqGS:MRVL) Declares US$0.06 Dividend As Shares Gain 2% - Yahoo Finance,positive,0.6808,MRVL
+2025-04-24,CRDO vs. MRVL: Which AI-focused Semiconductor Stock is the Better Buy? - MSN,positive,0.4404,MRVL
+2025-03-31,Here is Why Growth Investors Should Buy Marvell (MRVL) Now - Nasdaq,positive,0.3818,MRVL
+2025-03-27,Marvell Technology (NasdaqGS:MRVL) Showcases PCIe Gen 6 Optics Innovation Despite 4% Share Price Dip - Yahoo Finance,positive,0.1808,MRVL
+2025-04-08,"4 stocks to watch on Tuesday: WBA, TLRY, MRVL and LLY (WBA:NASDAQ) - Seeking Alpha",neutral,0.0,MRVL
+2025-04-02,Marvell (MRVL) Is Considered a Good Investment by Brokers: Is That True? - Yahoo Finance,positive,0.6908,MRVL
+2025-03-26,Marvell: This Is A Remarkable Buying Opportunity (NASDAQ:MRVL) - Seeking Alpha,positive,0.7506,MRVL
+2025-03-13,"Marvell Technology, Inc. (MRVL): “This Makes No Sense!” – Jim Cramer Says Market Is Undervaluing Marvell’s AI Boom - Yahoo Finance",negative,-0.3595,MRVL
+2025-03-14,Looking for a Growth Stock? 3 Reasons Why Marvell (MRVL) is a Solid Choice - Nasdaq,positive,0.4939,MRVL
+2025-03-18,Marvell (MRVL) Upgraded to Strong Buy: Here's What You Should Know - Yahoo Finance,positive,0.5106,MRVL
+2025-03-08,"Marvell (MRVL) Secures Amazon AI Contract, $120 Price Target Reiterated - Yahoo Finance",positive,0.4588,MRVL
+2025-02-28,"Marvell (MRVL) Loses -20.56% in 4 Weeks, Here's Why a Trend Reversal May be Around the Corner - Nasdaq",negative,-0.3182,MRVL
+2025-03-20,"Marvell Technology, Inc. (MRVL) Is a Trending Stock: Facts to Know Before Betting on It - Yahoo Finance",neutral,0.0,MRVL
+2025-04-21,Marvell Technology Inc (MRVL) Stock Price Down 5.97% on Apr 21 - GuruFocus,neutral,0.0,MRVL
+2025-04-24,Marvell Technology Inc (MRVL) Shares Up 6.83% on Apr 24 - GuruFocus,positive,0.296,MRVL
+2025-03-14,Marvell Technology Inc. (MRVL) – “We Got to Wait” – Jim Cramer - Yahoo Finance,neutral,0.0,MRVL
+2025-03-26,"Marvell Technology, Inc.'s (NASDAQ:MRVL) one-year returns climbed after last week's 5.0% gain, institutional investors must be happy - Yahoo Finance",positive,0.7964,MRVL
+2025-04-23,Marvell Is Stuck Between Amazon And A Hard Place (NASDAQ:MRVL) - Seeking Alpha,negative,-0.1779,MRVL
+2025-03-14,"Marvell Technology, Inc. (MRVL) Analysts See Strong AI Tailwinds, Maintain ‘Buy’ Rating - Yahoo Finance",positive,0.5106,MRVL
+2025-04-09,"Nasdaq Gains 12% Today, Alphabet (Nasdaq: GOOG) and Meta (Nasdaq: META) and Marvell (Nasdaq MRVL) Soar - 24/7 Wall St.",positive,0.34,MRVL
+2025-03-26,"Marvell Technology, Inc. (MRVL) Stock Down 37%—But Analyst Sees $100B Opportunity and Long-Term Growth - Insider Monkey",positive,0.6597,MRVL
+2025-03-14,Why Marvell Technology (MRVL) is a Top Growth Stock for the Long-Term - Nasdaq,positive,0.5267,MRVL
+2025-03-07,"Why Marvell Technology, Inc. (MRVL) Crashed on Thursday - Yahoo Finance",neutral,0.0,MRVL
+2025-04-30,"SA analyst upgrades: TSLA, T, CRM, TSM, MRVL, SAP, CRDO, MPW",neutral,0.0,MRVL
+2025-04-29,Analog Devices (ADI) Stock Sinks As Market Gains: What You Should Know - Nasdaq,positive,0.34,ADI
+2025-04-28,Analog Devices (ADI) Stock Falls Amid Market Uptick: What Investors Need to Know - Yahoo Finance,neutral,0.0,ADI
+2025-04-09,"Analog Devices, Inc.'s (NASDAQ:ADI) Stock Retreats 26% But Earnings Haven't Escaped The Attention Of Investors - simplywall.st",neutral,0.0,ADI
+2025-04-21,Analog Devices (ADI) Stock Moves -0.71%: What You Should Know - Yahoo Finance,neutral,0.0,ADI
+2025-04-25,Analog Devices (NasdaqGS:ADI) Establishes US$3 Billion Credit Facility - simplywall.st,positive,0.3818,ADI
+2025-04-13,"Is Analog Devices, Inc. (ADI) the Best Technology Dividend Stock to Invest in? - Yahoo Finance",positive,0.6369,ADI
+2025-03-27,Is ADI Stock Still Worth Holding Despite Falling 8% in a Month? - Yahoo Finance,positive,0.3278,ADI
+2025-04-08,Analog Devices (ADI) Stock Jumps 4.1%: Will It Continue to Soar? - Nasdaq,neutral,0.0,ADI
+2025-04-28,Brokers Suggest Investing in Analog Devices (ADI): Read This Before Placing a Bet - Yahoo Finance,neutral,0.0,ADI
+2025-04-17,Insider Sale: Director at $ADI Sells 159 Shares - Nasdaq,positive,0.296,ADI
+2025-04-04,Analog Devices (NasdaqGS:ADI) Expands Developer Offerings Despite 13% Stock Dip Last Week - Yahoo Finance,positive,0.1027,ADI
+2025-04-16,Analog Semiconductors Stocks Q4 Highlights: Analog Devices (NASDAQ:ADI) - Yahoo Finance,neutral,0.0,ADI
+2025-04-23,New Analyst Forecast: $ADI Given $214.0 Price Target - Nasdaq,neutral,0.0,ADI
+2025-04-22,Analog Devices (ADI) Price Target Slashed by Barclays to $170 | ADI Stock News - GuruFocus,negative,-0.2263,ADI
+2025-04-17,Analog Devices (ADI) Outpaces Stock Market Gains: What You Should Know - Nasdaq,positive,0.34,ADI
+2025-02-20,ADI Q1 Earnings Beat: Will a Strong Guidance Lift the Stock? - Yahoo Finance,positive,0.5106,ADI
+2025-01-21,Why Analog Devices (ADI) Outpaced the Stock Market Today - Yahoo Finance,neutral,0.0,ADI
+2025-04-22,Analog Devices' (NASDAQ:ADI) investors will be pleased with their favorable 77% return over the last five years - simplywall.st,positive,0.7184,ADI
+2025-03-05,Analog Devices: Remain Buy-Rated As ADI Moves Along The Upcycle Phase (NASDAQ:ADI) - Seeking Alpha,neutral,0.0,ADI
+2025-02-07,"Analog Devices, Inc. (ADI): Among The Chip Stocks In Focus Amid Tech Selloff - Yahoo Finance",neutral,0.0,ADI
+2025-04-16,Analog Devices (ADI) Target Price Reduced Amid Tariff Concerns | ADI Stock News - GuruFocus,neutral,0.0,ADI
+2025-03-21,Analog Devices (ADI) Down 15.6% Since Last Earnings Report: Can It Rebound? - Yahoo Finance,neutral,0.0,ADI
+2025-01-29,Wall Street Analysts Think Analog Devices (ADI) Is a Good Investment: Is It? - Nasdaq,positive,0.4404,ADI
+2025-03-03,Q4 Rundown: Analog Devices (NASDAQ:ADI) Vs Other Analog Semiconductors Stocks - Yahoo Finance,neutral,0.0,ADI
+2025-03-28,Analog Devices (ADI): A Top Pick For The Best Retirement Portfolio - Yahoo Finance,positive,0.7184,ADI
+2025-02-13,Countdown to Analog Devices (ADI) Q1 Earnings: A Look at Estimates Beyond Revenue and EPS - Nasdaq,neutral,0.0,ADI
+2025-04-24,(ADI) Investment Report - news.stocktradersdaily.com,neutral,0.0,ADI
+2025-02-17,Analog Devices: A Signal For Strength - Q1 Earnings Preview (NASDAQ:ADI) - Seeking Alpha,positive,0.4939,ADI
+2025-02-18,Analog Devices (ADI) Q4 Earnings Report Preview: What To Look For - Yahoo Finance,neutral,0.0,ADI
+2025-02-19,Here's What Key Metrics Tell Us About Analog Devices (ADI) Q1 Earnings - Nasdaq,neutral,0.0,ADI
+2025-04-21,Morgan Stanley Adjusts Price Target for Analog Devices (ADI) Amidst Market Challenges | ADI Stock News - GuruFocus,positive,0.0772,ADI
+2025-04-04,Analog Devices Inc (ADI) Stock Price Down 7.36% on Apr 4 - GuruFocus,neutral,0.0,ADI
+2025-04-04,Analog Devices (NasdaqGS:ADI) Expands Developer Offerings Despite 13% Stock Dip Last Week - simplywall.st,positive,0.1027,ADI
+2025-04-11,Analog Devices (ADI) Advances But Underperforms Market: Key Facts - Nasdaq,neutral,0.0,ADI
+2025-04-14,"Analog Devices (ADI) Secures $105M Grant, Sees Strong Q2 Outlook - Yahoo Finance",positive,0.7964,ADI
+2025-02-25,What Will ADI's CEO Reveal at the Upcoming Morgan Stanley Conference? - Stock Titan,neutral,0.0,ADI
+2024-11-29,"Here's What Analysts Are Forecasting For Analog Devices, Inc. (NASDAQ:ADI) After Its Yearly Results - simplywall.st",neutral,0.0,ADI
+2025-02-17,"Analog Devices, Inc. (ADI): Among the Semiconductor Stocks Making Impressive Comeback from DeepSeek AI Dip - Yahoo Finance",positive,0.5106,ADI
+2025-01-03,"Insider Sale: Chair & CEO of $ADI (ADI) Sells 10,000 Shares - Nasdaq",positive,0.296,ADI
+2025-04-04,Analog Devices a Top Socially Responsible Dividend Stock With 2.2% Yield (ADI) - Nasdaq,positive,0.4767,ADI
+2025-04-12,Citi Adjusts Price Target for Analog Devices (ADI) Amid Economic Concerns | ADI Stock News - GuruFocus,neutral,0.0,ADI
+2025-04-17,Analog Devices (ADI): Stifel Adjusts Target as Industry Faces Ta - GuruFocus,neutral,0.0,ADI
+2025-02-19,"Analog Devices (NASDAQ:ADI) Posts Better-Than-Expected Sales In Q4, Provides Encouraging Quarterly Revenue Guidance - Yahoo Finance",positive,0.5267,ADI
+2025-02-26,"Kentucky Retirement Systems Insurance Trust Fund Sells 3,677 Shares of Analog Devices, Inc. (NASDAQ:ADI) - InsuranceNewsNet",positive,0.6705,ADI
+2025-02-08,"Is Analog Devices, Inc. (ADI) the Best Long-term Stock to Invest In for High Returns? - Insider Monkey",positive,0.6369,ADI
+2025-02-05,"Is Analog Devices, Inc. (ADI) the Best Big Tech Stock to Buy According to Analysts? - Insider Monkey",positive,0.6369,ADI
+2025-01-29,"Analog Devices, Inc. (ADI) Reports Strong FY 2024 Growth, Secures $105M Under CHIPS Act - Yahoo Finance",positive,0.802,ADI
+2025-04-29,"Koch Exits Oil, Fuel Trading Businesses in Retreat From Speculation",positive,0.2023,ADI
+2025-04-29,"What options trading is telling us now about Amazon, Apple, Meta and Microsoft earnings",positive,0.1779,ADI
+2025-04-30,"Broadcom, Marvell among 'top picks' heading into earnings season: JP Morgan",positive,0.516,ADI
+2025-04-25,Why This Five-Star Analyst Sees Downside Risk for Palantir Stock (PLTR) - TipRanks,negative,-0.4767,PLTR
+2025-04-28,Jim Cramer Says Palantir Technologies (PLTR) is the ‘Number One Meme Stock of All Time’ - Insider Monkey,neutral,0.0,PLTR
+2025-04-28,Palantir Technologies (NASDAQ: PLTR) Price Prediction and Forecast 2025-2030 for April 28 - 24/7 Wall St.,neutral,0.0,PLTR
+2025-04-29,Analyst Says His AI Stock Models ‘Don’t Like’ Palantir Technologies (PLTR); Valuation Unjustifiable - Yahoo Finance,neutral,0.0,PLTR
+2025-04-24,Why Palantir (PLTR) Stock Is Trading Up Today - Yahoo Finance,neutral,0.0,PLTR
+2025-04-26,Why Palantir Technologies Inc. (PLTR) Soared Last Week - Yahoo Finance,neutral,0.0,PLTR
+2025-04-29,Palantir Technologies (PLTR) Stock: The Government’s Favorite AI Partner - MoneyCheck,positive,0.4588,PLTR
+2025-04-29,Palantir Q1 Preview: Solid Rule Of 40 Score May Continue (NASDAQ:PLTR) - Seeking Alpha,positive,0.1531,PLTR
+2025-04-29,Palantir Stock is Up 51% YTD: Is PLTR Still a Buy? - MSN,neutral,0.0,PLTR
+2025-03-25,PLTR Quantitative Stock Analysis - Nasdaq,neutral,0.0,PLTR
+2025-04-26,Why Palantir Technologies Inc. (PLTR) Went Up On Friday - Yahoo Finance,neutral,0.0,PLTR
+2025-04-14,Why Palantir (PLTR) Stock Is Up Today - Yahoo Finance,neutral,0.0,PLTR
+2025-04-29,Strong Earnings Report Lifted Palantir Technologies (PLTR) in Q1 - Insider Monkey,positive,0.5106,PLTR
+2025-04-16,Jim Cramer: Palantir (PLTR) “Can Go to 40”—It’s “Just Moving Up and Moving Up” - Yahoo Finance,neutral,0.0,PLTR
+2025-04-22,Palantir Stock Is Surging Today as NATO Embraces PLTR’s Battlefield AI System - TipRanks,negative,-0.3818,PLTR
+2025-04-11,Is Palantir Technologies (PLTR) the Best Tech Stock to Buy For Long-Term Investment? - Yahoo Finance,positive,0.6369,PLTR
+2025-04-26,Palantir's Moat Just Turned Into An Indispensable Fortress: Rating Upgrade (NASDAQ:PLTR) - Seeking Alpha,neutral,0.0,PLTR
+2025-04-28,Here’s Why Palantir (PLTR) Is Outperforming Its Peers - TipRanks,neutral,0.0,PLTR
+2025-04-16,Palantir Just Nailed A Major NATO Win. Should You Buy PLTR Stock Now? - Barchart.com,positive,0.6222,PLTR
+2025-04-29,"Is Palantir just a momentum stock, or is there more to PLTR than meets the eye? - Invezz",neutral,0.0,PLTR
+2025-04-25,Palantir Stock Soars On Defense Deals: What's Going On? - Palantir Technologies (NASDAQ:PLTR) - Benzinga,positive,0.128,PLTR
+2025-03-31,Palantir Technologies Inc. (PLTR) Stock Dips While Market Gains: Key Facts - Yahoo Finance,positive,0.34,PLTR
+2025-04-22,Palantir Is A Frontrunner For Trump’s ‘Golden Dome.’ Should You Buy PLTR Stock Now? - Barchart.com,neutral,0.0,PLTR
+2025-04-14,Palantir Technologies (NASDAQ: PLTR) Price Prediction and Forecast 2025-2030 for April 14 - 24/7 Wall St.,neutral,0.0,PLTR
+2025-04-17,Palantir Stock: The Breakthrough That Changes Everything (NASDAQ:PLTR) - Seeking Alpha,neutral,0.0,PLTR
+2025-04-08,Analysts Think Palantir Technologies (PLTR) is Among the Best Big Data Stocks to Buy - Yahoo Finance,positive,0.6369,PLTR
+2025-04-22,"Mizuho Tells Investors to Unload Palantir (PLTR) Stock, Citing Valuation - Yahoo Finance",neutral,0.0,PLTR
+2025-04-09,Why Trump’s Tariff Downpour Can Catalyze Palantir Stock (PLTR) - Yahoo Finance,neutral,0.0,PLTR
+2025-04-08,Is Palantir Technologies Inc. (PLTR) the Best Long Term Growth Stock to Buy According to Billionaires? - Yahoo Finance,positive,0.7783,PLTR
+2025-04-14,Well-Known Analyst Is Upbeat on Recent Deal by Palantir (PLTR) - Yahoo Finance,neutral,0.0,PLTR
+2025-04-04,Palantir Technologies (PLTR) – AI Expansion Fuels 100% Stock Surge - Yahoo Finance,neutral,0.0,PLTR
+2025-04-28,"SA analyst upgrades: TSLA, INTC, BAC, PLTR, MU, LULU, M, AIG - Seeking Alpha",neutral,0.0,PLTR
+2025-04-21,Palantir Technologies Busts Tariff Worries. Can PLTR Stock Reach $125 Again? - MoneyMorning.com,negative,-0.4019,PLTR
+2025-04-22,$PLTR stock is up 3% today. Here's what we see in our data. - Nasdaq,neutral,0.0,PLTR
+2025-04-16,Why Palantir Technologies Inc. (PLTR) Skyrocketed On Tuesday? - Yahoo Finance,neutral,0.0,PLTR
+2025-04-14,"Palantir (PLTR) Forecasts 31% Growth, Wins $100M Army AI Contract - Yahoo Finance",positive,0.743,PLTR
+2025-04-29,Popular stocks with increasing volume: SOFI SNAP PLTR MSTR PFE F INTC AMD PYPL HOOD WOLF SMCI - StreetInsider,positive,0.4215,PLTR
+2025-04-21,Earnings Growth & Price Strength Make Palantir Technologies Inc. (PLTR) a Stock to Watch - Nasdaq,positive,0.7003,PLTR
+2025-04-09,Is Palantir (PLTR) Expanding Its Client Base or Cashing In on Loyal Spenders? - Yahoo Finance,positive,0.4767,PLTR
+2025-04-17,Will NATO Deal Boost Palantir Stock? Consider PLTR Valuation First - Nasdaq,positive,0.4019,PLTR
+2025-03-05,Why Palantir (PLTR) Stock Is Climbing Today - Yahoo Finance,neutral,0.0,PLTR
+2025-04-22,Why Are Palantir (PLTR) Shares Climbing Today - Yahoo Finance,positive,0.296,PLTR
+2025-04-15,Palantir Is Hiding In Plain Sight: Maintaining The Stock With A Buy (NASDAQ:PLTR) - Seeking Alpha,negative,-0.296,PLTR
+2025-04-07,Here is What to Know Beyond Why Palantir Technologies Inc. (PLTR) is a Trending Stock - Yahoo Finance,neutral,0.0,PLTR
+2025-04-30,"SA analyst upgrades: TSLA, INTC, BAC, PLTR, MU, LULU, M, AIG",neutral,0.0,PLTR
+2025-04-16,$UUUU stock is up 11% today. Here's what we see in our data. - Nasdaq,neutral,0.0,UUUU
+2025-04-29,Renaissance Technologies LLC Purchases New Position in Energy Fuels Inc. (NYSEAMERICAN:UUUU) - MarketBeat,positive,0.2732,UUUU
+2025-04-28,Energy Fuels Stock: Price Weakness Ahead (NYSE:UUUU) - Seeking Alpha,negative,-0.1779,UUUU
+2025-04-04,UUUU Vs CCJ: Which Uranium Stock is a Better Bet Amid a Market Slump? - Yahoo Finance,positive,0.4404,UUUU
+2025-04-16,UUUU Stock Declines 28% YTD: Buying Opportunity or Red Flag? - Zacks Investment Research,positive,0.4215,UUUU
+2025-03-04,"UUUU Hits 52-Week Low Post Q4 Earnings: Buy, Sell or Hold the Stock? - Yahoo Finance",negative,-0.2732,UUUU
+2025-04-12,Energy Fuels (NYSEAMERICAN:UUUU) Sets New 12-Month Low - Here's What Happened - MarketBeat,neutral,0.0,UUUU
+2025-04-24,Energy Fuels Punts And Pushes Out The Goalpost (NYSE:UUUU) - Seeking Alpha,positive,0.2732,UUUU
+2025-04-18,Why Energy Fuels Inc. (UUUU) Stock is Gaining This Week - Yahoo Finance,positive,0.5994,UUUU
+2025-04-16,Wall Street Analysts See Energy Fuels (UUUU) as a Buy: Should You Invest? - Yahoo Finance,positive,0.2732,UUUU
+2025-03-19,UUUU Stock Rises on POSCO & Chemours Deals: How Should You Play It? - Yahoo Finance,positive,0.34,UUUU
+2025-02-25,"UUUU Stock Trades at Premium Value: Should You Buy, Hold or Sell? - Yahoo Finance",positive,0.34,UUUU
+2025-02-11,Energy Fuels (UUUU) Stock Declines While Market Improves: Some Information for Investors - Yahoo Finance,positive,0.5994,UUUU
+2024-12-30,"UUUU Stock Trades at Premium Value: Should You Buy, Sell or Hold? - Yahoo Finance",positive,0.34,UUUU
+2025-02-05,Energy Fuels (UUUU) Stock Dips While Market Gains: Key Facts - Yahoo Finance,positive,0.5423,UUUU
+2025-01-20,"UUUU Falls 28% in a Year: Should You Buy, Hold or Sell the Stock? - Yahoo Finance",neutral,0.0,UUUU
+2024-11-07,UUUU Stock Drops 4% After Q3 Earnings: Is This a Buy Opportunity? - Yahoo Finance,positive,0.4215,UUUU
+2025-03-31,Should You Invest in Energy Fuels (UUUU) Based on Bullish Wall Street Views? - Yahoo Finance,positive,0.2732,UUUU
+2025-04-01,Energy Fuels (UUUU) Stock Sinks As Market Gains: What You Should Know - Nasdaq,positive,0.5423,UUUU
+2025-04-18,Energy Fuels Inc. (UUUU): A Bull Case Theory - Yahoo Finance,positive,0.2732,UUUU
+2025-01-13,Energy Fuels (UUUU) Stock Sinks As Market Gains: What You Should Know - Yahoo Finance,positive,0.5423,UUUU
+2025-04-23,Energy Fuels Inc. (UUUU): Among the Best Uranium Stocks to Invest in According to Analysts - Yahoo,positive,0.743,UUUU
+2025-02-26,Is Energy Fuels (UUUU) a Buy as Wall Street Analysts Look Optimistic? - Yahoo Finance,positive,0.5267,UUUU
+2025-04-26,Energy Fuels (NYSEAMERICAN:UUUU) Trading Down 7.7% - What's Next? - MarketBeat,positive,0.2732,UUUU
+2025-04-24,(UUUU) Investment Analysis - news.stocktradersdaily.com,neutral,0.0,UUUU
+2025-01-06,Energy Fuels (UUUU) Laps the Stock Market: Here's Why - Yahoo Finance,positive,0.2732,UUUU
+2025-03-25,Is Energy Fuels Inc. (NYSE:UUUU) The Top Penny Stock That Will Skyrocket? - Insider Monkey,positive,0.4404,UUUU
+2025-03-07,"Insider Purchase: VP Critical Minerals/Strategic of $UUUU Buys 3,700 Shares - Nasdaq",neutral,-0.0258,UUUU
+2024-10-29,Should You Buy Energy Fuels (UUUU) Stock Ahead of Q3 Earnings? - Yahoo Finance,positive,0.2732,UUUU
+2025-03-14,Is It Worth Investing in Energy Fuels (UUUU) Based on Wall Street's Bullish Views? - Yahoo Finance,positive,0.4588,UUUU
+2025-04-23,Energy Fuels Inc. (UUUU): Among the Best Uranium Stocks to Invest in According to Analysts - Insider Monkey,positive,0.743,UUUU
+2025-01-22,Why Energy Fuels (UUUU) Is One of the Worst Performing Energy Stocks in 2024? - Yahoo Finance,negative,-0.2263,UUUU
+2025-01-27,Energy Fuels Inc (UUUU) is Attracting Investor Attention: Here is What You Should Know - Yahoo Finance,positive,0.6369,UUUU
+2024-11-04,Here is What to Know Beyond Why Energy Fuels Inc (UUUU) is a Trending Stock - Yahoo Finance,positive,0.2732,UUUU
+2025-01-08,Is Energy Fuels Inc. (UUUU) the Best Uranium Stock to Invest In Now? - Yahoo Finance,positive,0.743,UUUU
+2025-03-31,New 52-Week Low Could Prompt More Insider Buying At UUUU - Nasdaq,negative,-0.2732,UUUU
+2025-03-26,Energy Fuels (UUUU) Flat As Market Sinks: What You Should Know - Nasdaq,positive,0.2732,UUUU
+2024-11-15,Investors Heavily Search Energy Fuels Inc (UUUU): Here is What You Need to Know - Yahoo Finance,positive,0.2732,UUUU
+2024-10-17,Strength Seen in Energy Fuels (UUUU): Can Its 15.4% Jump Turn into More Strength? - Yahoo Finance,positive,0.8313,UUUU
+2025-04-22,Energy Fuels (NYSEAMERICAN:UUUU) Shares Gap Up - Time to Buy? - MarketBeat,positive,0.5106,UUUU
+2025-01-08,Wall Street Analysts Think Energy Fuels (UUUU) Is a Good Investment: Is It? - Yahoo Finance,positive,0.6124,UUUU
+2025-04-05,"943,563 Shares in Energy Fuels Inc. (NYSEAMERICAN:UUUU) Bought by Summit Financial LLC - MarketBeat",positive,0.5106,UUUU
+2024-12-02,UUUU Stock Shoots Up 7% as Madagascar Project Back On: Time to Buy? - Zacks Investment Research,neutral,0.0,UUUU
+2025-03-25,"Bruce D. Hansen Acquires 6,000 Shares of Energy Fuels Inc. (NYSEAMERICAN:UUUU) Stock - MarketBeat",positive,0.5106,UUUU
+2025-04-07,(UUUU) Long Term Investment Analysis - news.stocktradersdaily.com,neutral,0.0,UUUU
+2024-09-23,Why Energy Fuels (UUUU) Outpaced the Stock Market Today - Yahoo Finance,positive,0.2732,UUUU
+2025-01-22,A Big Year For Energy Fuels If Everything Falls Into Place (NYSE:UUUU) - Seeking Alpha,positive,0.2732,UUUU
+2025-04-18,Energy Fuels Inc. (UUUU): A Bull Case Theory - Insider Monkey,positive,0.2732,UUUU
+2025-04-16,Wall Street Analysts See Energy Fuels (UUUU) as a Buy: Should You Invest? - MSN,positive,0.2732,UUUU
+2024-09-29,Is Energy Fuels (UUUU) the Best Uranium Stock To Buy According to Hedge Funds? - Yahoo Finance,positive,0.743,UUUU
+2025-04-04,Energy Fuels (NYSEAMERICAN:UUUU) Hits New 1-Year Low - Should You Sell? - MarketBeat,neutral,0.0,UUUU
+2025-01-02,Energy Fuels (NYSE:UUUU) Stock Price Up 7.8% - Time to Buy? - MarketBeat,positive,0.2732,UUUU
+2024-10-24,Energy Fuels (UUUU) Upgraded to Strong Buy: Here's Why - Yahoo Finance,positive,0.6597,UUUU
+2025-04-21,Energy Fuels Sees Unusually High Options Volume (NYSEAMERICAN:UUUU) - MarketBeat,positive,0.2732,UUUU
+2025-04-17,"Noteworthy Thursday Option Activity: TTD, UUUU, TJX - Nasdaq",neutral,0.0,UUUU
+2025-04-23,Bridgewater Associates LP Lowers Holdings in Energy Fuels Inc. (NYSEAMERICAN:UUUU) - MarketBeat,positive,0.1531,UUUU
+2024-11-17,Energy Fuels (UUUU)’s Ambitious Expansion: Boosting Uranium Production to Power the Future - Yahoo Finance,positive,0.765,UUUU
+2024-10-17,Energy Fuels (UUUU) stock is booming: time to buy? - Invezz,positive,0.2732,UUUU
+2024-09-12,Energy Fuels Inc. (UUUU): Fast-Growing Penny Stock To Consider - Yahoo Finance,positive,0.2732,UUUU
+2024-08-22,Energy Fuels (UUUU) Enters Medical Isotope Market: Buy the Stock? - Yahoo Finance,positive,0.2732,UUUU
+2024-11-14,Catalysts Abound For Energy Fuels Inc. (NYSE:UUUU) - Seeking Alpha,positive,0.2732,UUUU
+2024-10-15,UUUU Boosts REE Potential With Base Resources' Buyout: Invest Now? - Yahoo Finance,positive,0.3182,UUUU
+2024-11-18,Energy Fuels (NYSE:UUUU) Shares Gap Up - Should You Buy? - MarketBeat,positive,0.5106,UUUU
+2024-12-26,Barclays PLC Grows Stock Holdings in Energy Fuels Inc. (NYSE:UUUU) - MarketBeat,positive,0.2732,UUUU
+2024-10-02,"Energy Fuels: Nuclear Is Coming Back, Strap In (NYSE:UUUU) - Seeking Alpha",positive,0.2732,UUUU
+2025-01-25,JPMorgan Chase & Co. Grows Stock Holdings in Energy Fuels Inc. (NYSE:UUUU) - MarketBeat,positive,0.2732,UUUU
+2024-11-13,Energy Fuels: Optimistic Overlook Despite Small Profitability Hiccup (NYSE:UUUU) - Seeking Alpha,positive,0.379,UUUU
+2024-07-10,Energy Fuels (UUUU) Falls 15.3% YTD: Should You Buy the Dip? - Yahoo Finance,positive,0.2732,UUUU
+2025-02-09,"Robertson Stephens Wealth Management LLC Purchases 55,709 Shares of Energy Fuels Inc. (NYSE:UUUU) - MarketBeat",positive,0.7579,UUUU
+2025-04-30,"Energy Fuels, Inc. (UUUU) Q4 2024 Earnings Call Transcript",positive,0.2732,UUUU
+2025-04-29,Penn Capital Management Company LLC Makes New Investment in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,neutral,0.0,SRAD
+2025-04-04,"Jim Cramer on Sportradar (SRAD): “A Very Interesting, Intriguing Stock” - Insider Monkey",positive,0.4576,SRAD
+2025-04-24,Why Sportradar Group AG (SRAD) Lagged Performance on Wednesday - MSN,negative,-0.296,SRAD
+2025-04-07,New Analyst Forecast: $SRAD Given 'Buy' Rating - Nasdaq,neutral,0.0,SRAD
+2025-04-27,"63,439 Shares in Sportradar Group AG (NASDAQ:SRAD) Purchased by Russell Investments Group Ltd. - MarketBeat",positive,0.296,SRAD
+2025-04-28,Brokerages Set Sportradar Group AG (NASDAQ:SRAD) PT at $27.00 - MarketBeat,neutral,0.0,SRAD
+2025-04-28,JPMorgan Chase & Co. Has $1.33 Million Stock Holdings in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,neutral,0.0,SRAD
+2025-04-28,Jump Financial LLC Takes Position in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,neutral,0.0,SRAD
+2025-04-27,Sportradar Group AG (NASDAQ:SRAD) is Greenhouse Funds LLLP's Largest Position - MarketBeat,neutral,0.0,SRAD
+2025-04-28,Sportradar Group (NASDAQ:SRAD) Hits New 12-Month High - Time to Buy? - MarketBeat,neutral,0.0,SRAD
+2025-04-27,Stelrad Group PLC (LON:SRAD) Raises Dividend to GBX 4.81 Per Share - MarketBeat,positive,0.296,SRAD
+2025-04-24,Sportradar Group (NASDAQ:SRAD) Shares Gap Up - Here's Why - MarketBeat,positive,0.296,SRAD
+2025-04-27,Invesco Ltd. Purchases New Holdings in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,neutral,0.0,SRAD
+2025-04-28,"Hood River Capital Management LLC Purchases Shares of 418,060 Sportradar Group AG (NASDAQ:SRAD) - MarketBeat",positive,0.296,SRAD
+2025-04-26,"Marshall Wace LLP Sells 337,705 Shares of Sportradar Group AG (NASDAQ:SRAD) - MarketBeat",positive,0.296,SRAD
+2025-03-19,Sportradar Group AG (SRAD) Reports Break-Even Earnings for Q4 - Nasdaq,neutral,0.0,SRAD
+2025-04-28,Oberweis Asset Management Inc. Invests $12.64 Million in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,positive,0.3612,SRAD
+2025-04-24,"Renaissance Technologies LLC Buys 169,010 Shares of Sportradar Group AG (NASDAQ:SRAD) - MarketBeat",positive,0.296,SRAD
+2025-04-22,Sportradar rallies after BofA flips from being a bear to being a bull on the sports data stock (SRAD:NASDAQ) - Seeking Alpha,neutral,0.0,SRAD
+2025-04-21,The Bet Paid Off: Sportradar Nears IPO Highs (NASDAQ:SRAD) - Seeking Alpha,neutral,0.0,SRAD
+2025-04-11,BTIG Initiates Coverage of Sportradar Group (SRAD) with Buy Recommendation - Nasdaq,neutral,0.0,SRAD
+2025-04-24,"Sportradar Group (NASDAQ:SRAD) Raised to ""Buy"" at Bank of America - MarketBeat",neutral,0.0,SRAD
+2025-04-23,Sportradar Group AG (SRAD): Among the Tech Stocks That Are Up the Most So Far in 2025 - Insider Monkey,neutral,0.0,SRAD
+2025-04-05,Sportradar Group (NASDAQ:SRAD) Shares Gap Up - Time to Buy? - MarketBeat,positive,0.296,SRAD
+2025-01-24,All You Need to Know About Sportradar Group (SRAD) Rating Upgrade to Buy - Yahoo Finance,neutral,0.0,SRAD
+2025-04-23,"BofA Upgrades Sportradar (SRAD) to Buy, Raises Price Target to $28 | SRAD Stock News - GuruFocus",neutral,0.0,SRAD
+2025-04-07,Morgan Stanley Forecasts Strong Price Appreciation for Sportradar Group (NASDAQ:SRAD) Stock - MarketBeat,positive,0.765,SRAD
+2025-04-23,"125,160 Shares in Sportradar Group AG (NASDAQ:SRAD) Bought by 1492 Capital Management LLC - MarketBeat",positive,0.296,SRAD
+2025-03-12,Earnings Preview: Sportradar Group AG (SRAD) Q4 Earnings Expected to Decline - Yahoo Finance,neutral,0.0,SRAD
+2025-04-13,"479,738 Shares in Sportradar Group AG (NASDAQ:SRAD) Acquired by Nixon Capital LLC - MarketBeat",positive,0.296,SRAD
+2025-04-19,When (SRAD) Moves Investors should Listen - news.stocktradersdaily.com,neutral,0.0,SRAD
+2025-04-11,Trexquant Investment LP Raises Stake in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,neutral,0.0,SRAD
+2025-03-14,Sportradar Group AG Q4 Preview: I Expect Top-Line Growth To Slow (NASDAQ:SRAD) - Seeking Alpha,positive,0.3818,SRAD
+2025-04-22,"Sportradar (SRAD) Receives Double Upgrade, Shares Climb - GuruFocus",positive,0.296,SRAD
+2025-04-13,UBS Group Boosts Sportradar Group (NASDAQ:SRAD) Price Target to $29.00 - MarketBeat,positive,0.3182,SRAD
+2025-04-01,Sportradar highlights its sports betting market edge at the company's Investor Day event (SRAD:NASDAQ) - Seeking Alpha,neutral,0.0,SRAD
+2025-04-21,Sportradar Group (NASDAQ:SRAD) Price Target Raised to $30.00 - MarketBeat,neutral,0.0,SRAD
+2025-04-21,Sportradar Group (NASDAQ:SRAD) Given New $23.00 Price Target at Morgan Stanley - MarketBeat,neutral,0.0,SRAD
+2025-04-19,Sportradar Group (NASDAQ:SRAD) Sets New 12-Month High - Here's Why - MarketBeat,neutral,0.0,SRAD
+2025-01-25,Sportradar Group AG (SRAD): Jim Cramer Likes Its Profitability and Growth Potential – Here’s Why - Yahoo Finance,positive,0.7579,SRAD
+2025-04-08,Arrowstreet Capital Limited Partnership Grows Stake in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,negative,-0.2263,SRAD
+2025-04-07,"Sportradar Group's (SRAD) ""Buy"" Rating Reaffirmed at Needham & Company LLC - MarketBeat",neutral,0.0,SRAD
+2025-04-19,Portolan Capital Management LLC Reduces Stake in Sportradar Group AG (NASDAQ:SRAD) - MarketBeat,neutral,0.0,SRAD
+2025-04-16,Sportradar Group (NASDAQ:SRAD) Earns Buy Rating from Analysts at BTIG Research - MarketBeat,neutral,0.0,SRAD
+2025-04-23,Sportradar Group AG (NASDAQ:SRAD) Short Interest Up 42.1% in March - MarketBeat,positive,0.4588,SRAD
+2025-04-05,Sportradar Group AG (SRAD) – The Hidden Gem in Sports Betting Tech - Yahoo,neutral,0.0,SRAD
+2024-12-17,Sportradar Q3: Earnings Momentum Stands Incredibly Strong (NASDAQ:SRAD) - Seeking Alpha,positive,0.5563,SRAD
+2025-03-02,(SRAD) Long Term Investment Analysis - news.stocktradersdaily.com,neutral,0.0,SRAD
+2025-04-04,Sportradar Group AG (SRAD) – The Hidden Gem in Sports Betting Tech - Insider Monkey,neutral,0.0,SRAD
+2025-04-08,Sportradar Group (NASDAQ:SRAD) Price Target Raised to $32.00 at Canaccord Genuity Group - MarketBeat,neutral,0.0,SRAD
+2025-04-30,Sportradar Group AG (SRAD) Q4 2024 Earnings Call Transcript,neutral,0.0,SRAD
+2025-04-29,Alphabet (GOOGL) Stock Gears Up for Monster Breakout - TipRanks,neutral,0.0,GOOGL
+2025-04-28,"Clues From Google Earnings With Microsoft, Apple, Amazon Reports On Deck - Investor's Business Daily",positive,0.1779,GOOGL
+2025-04-29,U.S Department of Justice Seeks to Cut Alphabet (GOOGL) Stock Down to Size - Yahoo Finance,positive,0.3182,GOOGL
+2025-04-27,Alphabet Q1: The Top Risk-Averse Stock Positioned For A 2026 Boom (NASDAQ:GOOGL) - Seeking Alpha,positive,0.2023,GOOGL
+2025-04-28,Alphabet Inc. (GOOGL) Is a Trending Stock: Facts to Know Before Betting on It - Yahoo Finance,neutral,0.0,GOOGL
+2025-04-27,DOJ Seeks Tough Measures on Alphabet Inc. (GOOGL) to Curb AI-Driven Search Monopoly - Yahoo Finance,negative,-0.128,GOOGL
+2025-04-24,"Alphabet's Q1 earnings shattered analyst expectations, sending the stock soaring. Google's CEO credits its AI efforts. - Business Insider",negative,-0.1531,GOOGL
+2025-03-31,Is Google at risk of becoming irrelevant? Alphabet’s stock drop draws comparison to Kodak. - MarketWatch,negative,-0.4939,GOOGL
+2025-04-28,SpaceX Stake Boosts Alphabet Earnings. Is Google Stock A Buy Or Sell? - Investor's Business Daily,positive,0.3182,GOOGL
+2025-04-29,"Fund Update: Catalyst Capital Advisors LLC added 28,269 shares of GOOGLE ($GOOGL) to their portfolio - Nasdaq",positive,0.296,GOOGL
+2025-04-25,Google earnings were ‘pristine.’ But does that actually matter for Alphabet’s stock? - MarketWatch,neutral,0.0387,GOOGL
+2025-04-25,"Google says deep AI investments powering ad sales, soothing anxious investors - Reuters",positive,0.0772,GOOGL
+2025-04-24,Google Parent Alphabet's Stock Climbs as AI-Fueled Search Growth Drives Revenue Beat - Investopedia,positive,0.3818,GOOGL
+2025-04-23,Is Alphabet Inc. (GOOGL) the Best Stock to Buy and Hold for 20 Years? - Yahoo Finance,positive,0.6369,GOOGL
+2025-04-25,Google’s $70 Billion Buyback Will Help the Stock. Don’t Expect It to Take Off. - Barron's,positive,0.4019,GOOGL
+2025-04-24,Google Earnings Beat As Internet Search Advertising Growth Tops Estimates - Investor's Business Daily,positive,0.7096,GOOGL
+2025-04-25,"Google stock rises after it beats on earnings, raises dividend, and authorizes $70 billion in buybacks - Yahoo Finance",neutral,0.0,GOOGL
+2025-04-28,Here's How Waymo's Robotaxi Momentum Will Pay Off For Google Stock - Investor's Business Daily,negative,-0.1027,GOOGL
+2025-04-25,Did Google Earnings Results Put Search Worries To Rest? Here's What Analysts Are Saying - Investor's Business Daily,negative,-0.4215,GOOGL
+2025-04-23,Google Earnings Due. Here's What Could Move Alphabet Stock. - Investor's Business Daily,neutral,0.0,GOOGL
+2025-04-25,Google Parent Alphabet’s Stock Climbs as Analysts Raise Targets on AI-Driven Growth - Investopedia,positive,0.3818,GOOGL
+2025-04-25,Alphabet Rolls Out $70 Billion Buyback but Analysts Stay Wary on Google Stock’s Forecast - TipRanks,neutral,0.0,GOOGL
+2025-04-24,Google Earnings: Stock Soars As Q1 Results Shatter Expectations - Forbes,neutral,0.0,GOOGL
+2025-04-29,"GOOGL, AMZN and AAPL Forecast – Major US Stocks Quiet in the Premarket on Tuesday - FXEmpire",neutral,0.0,GOOGL
+2025-04-29,Alphabet (GOOGL) Stock: Why the AT&T Breakup Offers Hope for Google Investors - MoneyCheck,positive,0.4404,GOOGL
+2025-04-10,"Alphabet’s (GOOGL) Ironwood AI Chip Drops – 9,000+ Chip Clusters Powering Gemini Models - Yahoo Finance",neutral,0.0,GOOGL
+2025-04-25,Google Gives Stock Markets Hope of a Big Tech Comeback and 5 Other Things to Know Today - Barron's,positive,0.4404,GOOGL
+2025-04-17,Federal Judge Rules Against Google In Advertising Antitrust Case. Trade Desk Gains. - Investor's Business Daily,positive,0.34,GOOGL
+2025-04-24,Google’s Earnings Power Holds Up in Global Turbulence - WSJ,neutral,0.0,GOOGL
+2025-04-24,GOOGL Earnings: Google Surges after Smashing EPS Estimates - TipRanks,neutral,0.0,GOOGL
+2025-04-29,Alphabet's Growth Blueprint: Navigating Core Strengths And Future Opportunities (GOOGL) - Seeking Alpha,positive,0.7845,GOOGL
+2025-04-25,$GOOGL stock is up 2% today. Here's what we see in our data. - Nasdaq,neutral,0.0,GOOGL
+2025-04-28,Alphabet Inc. (GOOGL) Is a Trending Stock: Facts to Know Before Betting on It - Nasdaq,neutral,0.0,GOOGL
+2025-04-29,"GOOGL, AMZN, and AAPL Outlook Tech Stocks Steady as Wall Street Eyes Earnings - TECHi",neutral,0.0,GOOGL
+2025-04-28,Google Stock: A Crown Jewel In The Big Tech Group (NASDAQ:GOOG) - Seeking Alpha,positive,0.3612,GOOGL
+2025-04-24,How Google Provides A Better Short Option Than Other Mag 7 Stocks - Investor's Business Daily,positive,0.4404,GOOGL
+2025-04-29,"GOOGL, AMZN, and AAPL Outlook: Tech Stocks Hold Steady as Wall Street Awaits Earnings Reports - paginasiete.bo",positive,0.0772,GOOGL
+2025-04-25,Google Stock (GOOGL) Continues to Soar as Top Analysts Cheer Its Earnings Beat - markets.businessinsider.com,positive,0.6249,GOOGL
+2025-04-25,Is It Time To Snap Up GOOGL Stock As Alphabet’s Core Businesses Surge? - Barchart.com,neutral,0.0,GOOGL
+2025-04-24,Stock Market Triggers This Bullish Upgrade; Google Jumps On Earnings Late - Investor's Business Daily,neutral,0.0,GOOGL
+2025-04-25,"Stock Market Rallies On Trump Tariff Hopes; Google, ServiceNow, AT&T, Tesla In Focus: Weekly Review - Investor's Business Daily",positive,0.4215,GOOGL
+2025-04-25,Alphabet (GOOGL) Shares Rise on Strong Q1 Results and AI Momentum - Yahoo,positive,0.6705,GOOGL
+2025-04-25,"GOOGL Q1 Earnings Beat Estimates, Revenues Rise Y/Y, Stock Up - Nasdaq",neutral,0.0,GOOGL
+2025-04-25,Futures: Nasdaq Hasn't Done This Since '01; Google Pops Late - Investor's Business Daily,neutral,0.0,GOOGL
+2025-04-25,Alphabet Revenue Jumped 12% In Q1. How Should You Play GOOGL Stock Here? - Barchart.com,positive,0.34,GOOGL
+2025-04-24,Alphabet shares rise as Google search boosts profits - Financial Times,positive,0.7506,GOOGL
+2025-04-24,Google Earnings Will Be Biggest Q1 Report Yet As Investors Search For Tariff And Recession Impacts - Forbes,negative,-0.4215,GOOGL
+2025-04-25,Google Parent Alphabet Leads Adtech Stocks Higher on Signs of AI Success - Investopedia,positive,0.5719,GOOGL
+2025-04-08,Alphabet (GOOGL) Stock Moves -1.4%: What You Should Know - Yahoo Finance,neutral,0.0,GOOGL
+2025-04-25,Buy the Dip in Alphabet (GOOGL) Stock as Q1 Earnings Approach? - MSN,neutral,0.0,GOOGL
+2025-04-08,Is Alphabet Inc. (GOOGL) the Best Big Data Stock to Buy According to Analysts? - Yahoo Finance,positive,0.6369,GOOGL
+2025-04-24,Alphabet Delivered A Massive Q1 2025 Beat And Is Undervalued (GOOGL) - Seeking Alpha,neutral,0.0,GOOGL
+2025-04-24,"Palantir, Google Expand Cloud Computing Partnership To Target Federal Agencies - Investor's Business Daily",positive,0.3182,GOOGL
+2025-04-15,"AI, Waymo & Wiz: Can These 3 Factors Push GOOGL Stock Up? - Yahoo Finance",neutral,0.0,GOOGL
+2025-04-25,Dow Jones Falls Ahead Of Inflation Survey; Google Surges On Earnings - Investor's Business Daily,neutral,0.0,GOOGL
+2025-04-25,Alphabet Inc. (GOOGL) Stock: Google Parent Company Smashes Earnings Expectations - CoinCentral,neutral,0.0,GOOGL
+2025-04-28,Alphabet (GOOGL) Stock Dips 2% Amid DOJ’s Antitrust Push - paginasiete.bo,neutral,0.0,GOOGL
+2025-04-21,"NVDA, CRM, or GOOGL: Which Tech Stock Is the Most Attractive Pick? - TipRanks",positive,0.4927,GOOGL
+2025-04-25,Alphabet Stock (NASDAQ:GOOGL) Notches up as Waymo Hits Quarter-Million Riders Per Week - TipRanks,neutral,0.0,GOOGL
+2025-04-24,"5 stocks to watch on Thursday: GOOGL, INTC, PG, MRK and CMG (GOOG:NASDAQ) - Seeking Alpha",neutral,0.0,GOOGL
+2025-04-24,Google's revenue tops Wall Street's expectations — and the stock climbs - qz.com,positive,0.5106,GOOGL
+2025-04-24,Google Stock Pops on Better-Than-Expected Revenue Surge - Wall Street Pit,neutral,0.0,GOOGL
+2025-03-31,Analysts reboot Google parent price target on economic concerns - TheStreet,neutral,0.0,GOOGL
+2025-04-09,"Google Cloud News: Ironwood Processor, AI Gemini Models, Global Network - Investor's Business Daily",neutral,0.0,GOOGL
+2025-04-11,Is Alphabet Inc. (GOOGL) the Top Tech Stock to Buy According to Billionaire Ken Fisher? - Yahoo Finance,positive,0.2023,GOOGL
+2025-04-11,Is Alphabet Inc. (NASDAQ:GOOGL) the Best Tech Stock to Buy For Long-Term Investment? - Yahoo Finance,positive,0.6369,GOOGL
+2025-04-14,Is Google Stock A Buy Or Sell Below $160 Amidst Market Turmoil? - Barchart.com,negative,-0.3612,GOOGL
+2025-04-24,"Google says deep AI investments powering ad sales, soothing anxious investors - Yahoo Finance",positive,0.0772,GOOGL
+2025-04-09,Wall St. Analysts Reiterate Buy Ratings on Alphabet (GOOGL) Stock - TipRanks,neutral,0.0,GOOGL
+2025-04-22,How Will Google Stock React To Its Upcoming Earnings? - Forbes,neutral,0.0,GOOGL
+2025-04-29,Tesla (TSLA) chair sells most of her stocks – her time is done? - Electrek,neutral,0.0,TSLA
+2025-04-27,Analyst Says Tesla (TSLA) Valuation Still ‘Incredibly Rich’ as Chinese Companies ‘Eat’ Its Market Share - Yahoo Finance,positive,0.296,TSLA
+2025-04-28,Tesla Stock (TSLA) Turnaround Set to Run Out of Steam Unless Musk Becomes ‘More Normal’ - TipRanks,neutral,0.0,TSLA
+2025-04-29,Airbnb Billionaire Joe Gebbia Buys Over $1 Million Worth Of TSLA Stock Ahead Of Elon Musk's Robotaxi Launch In June - Benzinga,positive,0.2263,TSLA
+2025-04-28,Tesla Share Price Prediction Suggests 34% Surge as Elon Musk’s TSLA Sees Biggest Rally in 6 Months - Finance Magnates,positive,0.296,TSLA
+2025-04-29,Why Did Tesla Stock [TSLA] Rise Again? - CleanTechnica,neutral,0.0,TSLA
+2025-04-29,"SA analyst upgrades: TSLA, PYPL, QBTS, ANET, HIMS, NYT (TSLA:NASDAQ) - Seeking Alpha",neutral,0.0,TSLA
+2025-04-29,TSLA Quantitative Stock Analysis - Nasdaq,neutral,0.0,TSLA
+2025-04-29,Tesla Board member and Airbnb co-founder loads up on TSLA ahead of robotaxi launch - Teslarati,neutral,0.0,TSLA
+2025-04-29,Redburn Atlantic: Time to Sell Tesla Stock (NASDAQ:TSLA) - TipRanks,neutral,0.0,TSLA
+2025-04-24,"Tesla Missed Earnings By 34%, Yet The Stock Is Rallying: Why? (NASDAQ:TSLA) - Seeking Alpha",negative,-0.296,TSLA
+2025-04-29,"Is Tesla, Inc. (TSLA) the Worst-Performing Blue Chip Stock So Far in 2025? - Yahoo Finance",neutral,0.0,TSLA
+2025-04-25,"The Tesla (TSLA) dilemma: company is cooked with Musk, but stock crashes without him - Electrek",negative,-0.09,TSLA
+2025-04-23,Tesla (TSLA) stock surges on Elon’s lies despite disastrous earnings - Electrek,positive,0.089,TSLA
+2025-04-23,Why Tesla (TSLA) Stock Is Trading Up Today - Yahoo Finance,neutral,0.0,TSLA
+2025-04-22,"Tesla’s (TSLA) High Margins Make It Attractive, Longtime Stock Picker Says - Yahoo Finance",positive,0.4404,TSLA
+2025-04-24,Wharton Professor Says ‘Radioactive’ Elon Musk is ‘Damaging’ to Tesla (TSLA) Brand and Company - Yahoo Finance,neutral,0.0,TSLA
+2025-04-28,"Tesla (NASDAQ: TSLA) Bull, Base, & Bear Price Prediction and Forecast - 24/7 Wall St.",neutral,0.0,TSLA
+2025-04-22,"Tesla (TSLA) Stock Can Slump to $170 “in Weeks,” Technical Analyst Says - Yahoo Finance",neutral,0.0,TSLA
+2025-04-29,"Tesla Stock: The Technoking Has Returned - Buy (Technical Analysis, Rating Upgrade) (TSLA) - Seeking Alpha",neutral,0.0,TSLA
+2025-04-27,Are Short Sellers About To Get Burned By Tesla (Nasdaq: TSLA) Stock - AOL.com,neutral,0.0,TSLA
+2025-04-29,Tesla Stock Drops Early Monday | TSLA Down Over 1.5% - TECHi,neutral,0.0,TSLA
+2025-04-29,Tesla (TSLA) Stock: Can Elon’s Return Jumpstart Slumping EV Sales? - MoneyCheck,neutral,0.0,TSLA
+2025-04-29,Tesla’s Semi Truck Plans and TSLA Stock Rebound: Further Gains Ahead? - FXLeaders,positive,0.34,TSLA
+2025-04-22,Tesla (TSLA) Q1 2025 financial results: missed big on already terrible expectations - Electrek,negative,-0.6486,TSLA
+2025-04-30,"Insider Buying: Tesla, Inc. (NASDAQ:TSLA) Director Acquires 4,000 Shares of Stock - MarketBeat",positive,0.296,TSLA
+2025-04-23,Investment Bank Says TSLA Stock Is Attractive for Long-Term Investors - Yahoo Finance,positive,0.4404,TSLA
+2025-04-21,Elon Musk breaks his own Tesla (TSLA) earnings rule in desperate move - Electrek,negative,-0.3182,TSLA
+2025-04-23,Tesla (TSLA) Stock Price in 5 Years: Dropping Sales and Q1 Report Reshape Long-Term Outlook - CCN.com,neutral,0.0,TSLA
+2025-04-28,Why Tesla Stock Rose Despite Poor Earnings (NASDAQ:TSLA) - Seeking Alpha,positive,0.3724,TSLA
+2025-04-27,Jim Cramer Says ‘When Tesla Inc. (TSLA) Goes Down It Tends To Hurt Everything Related’ - Yahoo Finance,negative,-0.5267,TSLA
+2025-04-29,"Tesla, Inc. (NASDAQ:TSLA) Stock Position Cut by Capstone Financial Advisors Inc. - MarketBeat",negative,-0.2732,TSLA
+2025-04-24,Tesla (NASDAQ: TSLA) Stock Price Prediction and Forecast 2025-2030 (April 24) - 24/7 Wall St.,neutral,0.0,TSLA
+2025-04-22,Tesla (TSLA) Q1 2025 earnings: What to expect - Teslarati,neutral,0.0,TSLA
+2025-04-28,"Investors Heavily Search Tesla, Inc. (TSLA): Here is What You Need to Know - Nasdaq",neutral,0.0,TSLA
+2025-04-25,BYD Earnings May Fuel Further Gains in Shares Versus Tesla (TSLA) - Bloomberg.com,positive,0.5574,TSLA
+2025-04-28,"Brad Gerstner Says ‘No Market’ for Tesla (TSLA) If It Doesn’t Execute on Pricing, Speed - Yahoo Finance",neutral,0.0,TSLA
+2025-04-11,Tesla (TSLA) Stock Slides as Market Rises: Facts to Know Before You Trade - Yahoo Finance,neutral,0.0,TSLA
+2025-04-25,"Renowned Analyst Is More Bullish on Tesla (TSLA) Stock, But It Will Likely Be Ejected From Momentum ETF - Yahoo",neutral,0.0,TSLA
+2025-04-16,"Earnings Estimates for TSLA Could Tumble, Bank Warns - Yahoo Finance",negative,-0.1027,TSLA
+2025-04-27,Used Tesla Prices Are Plunging. Is This The Final Nail In The Coffin For TSLA Stock? - Barchart.com,neutral,0.0,TSLA
+2025-04-29,"Tuesday 4/29 Insider Buying Report: TSLA, DOC - Nasdaq",neutral,0.0,TSLA
+2025-04-28,The Tesla Story Few See Coming (NASDAQ:TSLA) - Seeking Alpha,neutral,0.0,TSLA
+2025-04-28,Tesla May Be Gearing Up For The ‘E80’ In China. Should You Buy Or Sell TSLA Stock Here? - Barchart.com,neutral,0.0,TSLA
+2025-04-26,"Shark Tank’s Daymond John: Buy Tesla (TSLA), because it’s going back up - Teslarati",neutral,0.0,TSLA
+2025-04-20,Tesla faces crucial test as Q1 earnings loom: Will the TSLA stock be a buy before April 22? Here’s what an - The Economic Times,negative,-0.2263,TSLA
+2025-04-22,"Tesla Q1 Earnings: Looking Past Auto Weakness, Maintain Strong Buy (NASDAQ:TSLA) - Seeking Alpha",positive,0.128,TSLA
+2025-04-29,Tesla (TSLA) Raises Prices in Canada and Pushes Existing Inventory - The Globe and Mail,neutral,0.0,TSLA
+2025-04-16,Is Tesla Inc. (NASDAQ:TSLA) a Reddit Stock with High Potential? - Yahoo Finance,neutral,0.0,TSLA
+2025-04-15,"Is Tesla, Inc. (TSLA) the Best Machine Learning Stock to Buy Now? - Yahoo Finance",positive,0.6369,TSLA
+2025-04-21,Tesla Q1 Preview: Expecting Near Record Revenues (NASDAQ:TSLA) - Seeking Alpha,neutral,0.0,TSLA
+2025-04-28,Tesla's Plunge Isn't Close To Being Over (TSLA) - Seeking Alpha,neutral,0.0,TSLA
+2025-04-22,Tesla (TSLA) releases first quarter 2025 earnings results - Teslarati,neutral,0.0,TSLA
+2025-04-22,$TSLA stock is up 4% today. Here's what we see in our data. - Nasdaq,neutral,0.0,TSLA
+2025-04-22,Are Short Sellers About To Get Burned By Tesla (Nasdaq: TSLA) Stock - 24/7 Wall St.,neutral,0.0,TSLA
+2025-04-25,Famous Tesla Investor Warns It Would Be ‘Foolish’ to Ignore This Key Argument for TSLA Stock - Barchart.com,negative,-0.6597,TSLA
+2025-04-04,Why Tesla (TSLA) Stock Is Falling Today - Yahoo Finance,negative,-0.1531,TSLA
+2025-04-24,Analysts Slash Tesla Stock (TSLA) Forecast after Horrendous Q1 Miss and Tariff Risks - TipRanks,negative,-0.8225,TSLA
+2025-04-27,Tesla: The 'Musk Put' Is In Play (NASDAQ:TSLA) - Seeking Alpha,positive,0.34,TSLA
+2025-04-17,Tesla (TSLA) Stock Declines While Market Improves: Some Information for Investors - Nasdaq,positive,0.4215,TSLA
+2025-04-25,Tesla: It Is Likely Going To Get Much Worse (NASDAQ:TSLA) - Seeking Alpha,negative,-0.4767,TSLA
+2025-04-30,"SA analyst downgrades: TSLA, BABA, INMD, BDRAF, PSTG",neutral,0.0,TSLA
+2025-04-30,"SA analyst upgrades: TSLA, PYPL, QBTS, ANET, HIMS, NYT",neutral,0.0,TSLA
+2025-04-30,"SA analyst downgrades: TSLA, AAPL, T, PG, HPE, GILD, LRCX, ARCC",neutral,0.0,TSLA
+2025-04-30,"SA analyst upgrades: TSLA, INTC, BAC, PLTR, MU, LULU, M, AIG",neutral,0.0,TSLA
+2025-04-28,Is Apple Inc. (AAPL) the Best Stock to Buy According to Billionaire Warren Buffett? - Yahoo Finance,positive,0.6369,AAPL
+2025-04-27,"Earnings week ahead: MSFT, AAPL, META, AMZN, QCOM, PFE, MA, V, PYPL, ROKU, MCD, SBUX, KO, and more - Seeking Alpha",neutral,0.0,AAPL
+2025-04-28,"‘Expect Strong Earnings Results,’ Says Wedbush about MSFT, META, AMZN, and AAPL Stocks - TipRanks",positive,0.5106,AAPL
+2025-04-28,"Jim Cramer Says Washington Doesn’t ‘Care’ About Apple (AAPL) $500 Billion Investment, Services Jobs - Yahoo Finance",neutral,0.0,AAPL
+2025-04-28,"SA analyst downgrades: TSLA, AAPL, T, PG, HPE, GILD, LRCX, ARCC - Seeking Alpha",neutral,0.0,AAPL
+2025-04-29,Analysts Cautious on Apple (AAPL) as AI Push Fails to Justify Premium Valuation - Yahoo Finance,negative,-0.4939,AAPL
+2025-04-29,Apple (AAPL) Earnings Preview: Can the Stock Rebound? - tastylive,neutral,0.0,AAPL
+2025-04-29,Apple Stock (AAPL) Catches an Upgrade Heading into Earnings - TipRanks,neutral,0.0,AAPL
+2025-04-28,Apple (AAPL) Stock Earnings Preview: What To Consider Before The Report - Forbes,neutral,0.0,AAPL
+2025-04-22,AAPL Quantitative Stock Analysis - Nasdaq,neutral,0.0,AAPL
+2025-04-29,"GOOGL, AMZN and AAPL Forecast – Major US Stocks Quiet in the Premarket on Tuesday - FXEmpire",neutral,0.0,AAPL
+2025-04-29,Apple Stock (AAPL) Sours Despite Ramping Up Indian iPhone Production to Beat Trump’s Tariffs - TipRanks,neutral,0.0,AAPL
+2025-04-23,Is Apple Inc. (AAPL) the Best Stock to Buy and Hold for 20 Years? - Yahoo Finance,positive,0.6369,AAPL
+2025-04-27,Jim Cramer Says Apple Inc. (AAPL) Just ‘Doesn’t Grow As Fast As We’d Like’ - Yahoo Finance,neutral,0.0,AAPL
+2025-04-16,Why Apple Inc. (AAPL) Is One of the Best Blue Chip Stocks to Buy According to Billionaires - Yahoo Finance,positive,0.6369,AAPL
+2025-04-29,"GOOGL, AMZN, and AAPL Outlook: Tech Stocks Hold Steady as Wall Street Awaits Earnings Reports - paginasiete.bo",positive,0.0772,AAPL
+2025-04-29,"Analyst Raises Apple (AAPL) Price Target, Expects Strong Quarterly Results | AAPL Stock News - GuruFocus",positive,0.5106,AAPL
+2025-04-29,"GOOGL, AMZN, and AAPL Outlook Tech Stocks Steady as Wall Street Eyes Earnings - TECHi",neutral,0.0,AAPL
+2025-04-09,"Apple (AAPL) Stock Trades Up, Here Is Why - Yahoo Finance",neutral,0.0,AAPL
+2025-04-28,Gear Up for Apple (AAPL) Q2 Earnings: Wall Street Estimates for Key Metrics - Yahoo Finance,neutral,0.0,AAPL
+2025-04-15,Is Apple Inc. (AAPL) The Best American Tech Stock to Buy Now? - Yahoo Finance,positive,0.6369,AAPL
+2025-04-28,Apple: The Dividend Should Rise But Stock Is Still Likely To Slide (NASDAQ:AAPL) - Seeking Alpha,neutral,0.0,AAPL
+2025-04-03,Why Apple (AAPL) Stock Is Trading Lower Today - Yahoo Finance,negative,-0.296,AAPL
+2025-04-14,Why Apple (AAPL) Stock Is Up Today - Yahoo Finance,neutral,0.0,AAPL
+2025-04-25,Apple Earnings in Focus! Can AAPL Stock Withstand the Tariff Storm? - TipRanks,neutral,0.0,AAPL
+2025-04-25,Apple Stock (NASDAQ:AAPL) Notches Up Despite Price Target Cuts - markets.businessinsider.com,positive,0.2235,AAPL
+2025-04-04,"Apple (AAPL) Stock Trades Down, Here Is Why - Yahoo Finance",neutral,0.0,AAPL
+2025-04-11,Is Apple Inc. (NASDAQ:AAPL) a NASDAQ Stock with the Highest Upside Potential? - Yahoo Finance,neutral,0.0,AAPL
+2025-04-21,Apple (AAPL) Stock Moves -1.94%: What You Should Know - Nasdaq,neutral,0.0,AAPL
+2025-04-08,Is Apple Inc. (AAPL) the Best Fundamental Stock to Buy According to Billionaires? - Yahoo Finance,positive,0.6369,AAPL
+2025-04-07,Apple (AAPL) Stock: More Downside or Massive Buying Opportunity? - MoneyMorning.com,positive,0.1298,AAPL
+2025-04-08,How Stock Options Traders See Apple’s (AAPL) Death Cross - Yahoo Finance,negative,-0.5994,AAPL
+2025-04-24,"Analyst Explains Threats to Apple (AAPL), Says It ‘Fumbled’ AI Launch - Yahoo Finance",negative,-0.4215,AAPL
+2025-04-27,Is Apple Inc. (AAPL) the Most Profitable Blue Chip Stock to Buy Now? - Insider Monkey,positive,0.4927,AAPL
+2025-04-09,Why Buying The Dip on Apple Stock (AAPL) is a Bad Idea - TipRanks,negative,-0.5423,AAPL
+2025-04-11,Jim Cramer on Apple (AAPL): “What is the Most Hurt Stock? Apple. Are Those Just Fools Buying It?” - Yahoo Finance,negative,-0.8049,AAPL
+2025-04-12,"AAPL, AMZN, or MSFT: Which Magnificent 7 Stock Is Wall Street’s Most Attractive Pick? - TipRanks",positive,0.796,AAPL
+2025-04-12,Trump’s Cuts Tariffs on Phones: How Much Could Apple (Nasdaq: AAPL) Stock Soar On Monday? - AOL.com,negative,-0.296,AAPL
+2025-04-10,Jim Cramer on Apple Inc. (AAPL): Can Tariffs Derail the iPhone Giant’s Global Dominance? - Yahoo Finance,negative,-0.1027,AAPL
+2025-04-28,"Jim Cramer Having Second Thoughts on His ‘Own, Don’t Trade’ Apple (AAPL) Mantra - Yahoo Finance",neutral,0.0,AAPL
+2025-04-21,Apple (AAPL) Stock Moves -1.94%: What You Should Know - Yahoo Finance,neutral,0.0,AAPL
+2025-04-24,"AAPL Stock Faces Analyst Downgrades On Looming Tariffs, Supply Chain Pressures: 'A Lose-Lose Choice' - Benzinga",negative,-0.4215,AAPL
+2025-04-06,Analysts Keeping the Faith on Apple Stock (AAPL) Despite Tariff Turmoil - markets.businessinsider.com,positive,0.6007,AAPL
+2025-04-09,"Apple’s (AAPL) Outlook Is Positive, Goldman Executive Says - Yahoo Finance",positive,0.5574,AAPL
+2025-03-31,Apple Inc. (AAPL): Among Billionaire Ken Fisher’s Top Growth Stock Picks - Yahoo Finance,positive,0.5267,AAPL
+2025-04-18,Is Apple Inc. (AAPL) the Best Metaverse Stock to Invest in? - Yahoo Finance,positive,0.6369,AAPL
+2025-04-12,Trump's Cuts Tariffs on Phones: How Much Could Apple (Nasdaq: AAPL) Stock Soar On Monday? - 24/7 Wall St.,negative,-0.296,AAPL
+2025-04-11,Apple Stock: The Bottom Is Yet To Come (NASDAQ:AAPL) - Seeking Alpha,neutral,0.0,AAPL
+2025-04-09,Apple (AAPL) Upgraded by Investment Bank to Hold - Yahoo Finance,neutral,0.0,AAPL
+2025-04-04,"‘Earnings Could Drop by 28%,’ Says Needham about Apple Stock (AAPL) - markets.businessinsider.com",negative,-0.2732,AAPL
+2025-04-13,Apple (AAPL) Faces 28% EPS Hit Amid Tariff Fears Despite AI Rollout - Yahoo Finance,negative,-0.4215,AAPL
+2025-04-28,"Jim Cramer Says Washington Doesn’t ‘Care’ About Apple (AAPL) $500 Billion Investment, Services Jobs - Yahoo",neutral,0.0,AAPL
+2025-04-09,"Apple (AAPL) Faces Uncertainty, but Analysts Still See It as a Top Market Pick - Yahoo Finance",positive,0.128,AAPL
+2025-04-11,Is Apple Inc. (AAPL)the Top Tech Stock to Buy According to Billionaire Ken Fisher? - Yahoo Finance,positive,0.2023,AAPL
+2025-04-01,Jim Cramer on Apple Inc. (NASDAQ:AAPL): “Apple is a great stock but. . .” - Yahoo Finance,positive,0.3716,AAPL
+2025-04-10,Apple (AAPL) Faces Global Pressure – KeyBanc Slashes Price Target to $170 - Yahoo Finance,negative,-0.4588,AAPL
+2025-04-16,Is Apple Inc. (NASDAQ:AAPL) the Best NASDAQ Stock to Buy So Far in 2025? - Yahoo Finance,positive,0.6369,AAPL
+2025-04-09,$AAPL stock is up 4% today. Here's what we see in our data. - Nasdaq,neutral,0.0,AAPL
+2025-04-09,"AAPL: Apple Stock Parties Like It's 1998 to Reclaim First Spot, Elbowing Out Microsoft - TradingView",positive,0.6369,AAPL
+2025-04-10,"AAPL crumble: stock hit again, as White House clarifies 145% China tariff rate - AppleInsider",positive,0.2263,AAPL
+2025-04-10,Jim Cramer Warns Apple (AAPL) Is ‘Caught in the Crossfire’ of U.S.-China Tariff War - Yahoo Finance,negative,-0.6486,AAPL
+2025-04-30,"SA analyst downgrades: TSLA, AAPL, T, PG, HPE, GILD, LRCX, ARCC",neutral,0.0,AAPL
+2025-04-29,Microsoft’s Q3 Earnings Forecast: Why MSFT Stock Is A Buy Before April 30 - Barchart.com,neutral,0.0,MSFT
+2025-04-28,Jim Cramer Says Microsoft (MSFT) Stock Has Been ‘Abysmal’ - Yahoo Finance,neutral,0.0,MSFT
+2025-04-27,"Earnings week ahead: MSFT, AAPL, META, AMZN, QCOM, PFE, MA, V, PYPL, ROKU, MCD, SBUX, KO, and more - Seeking Alpha",neutral,0.0,MSFT
+2025-04-29,"MSFT and AMZN Earnings in Focus, But It’s AI Spending That Could Move the Market - TipRanks",neutral,0.0,MSFT
+2025-04-28,Is Microsoft (MSFT) the Most Profitable Blue Chip Stock to Buy Now? - Yahoo Finance,positive,0.4927,MSFT
+2025-04-29,"Microsoft's relationship with OpenAI is 'evolving,' Wells Fargo says (MSFT:NASDAQ) - Seeking Alpha",positive,0.25,MSFT
+2025-04-27,Is Microsoft (MSFT) Among the Best Self-Driving Car Stocks to Buy According to Analysts? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-28,"‘Expect Strong Earnings Results,’ Says Wedbush about MSFT, META, AMZN, and AAPL Stocks - TipRanks",positive,0.5106,MSFT
+2025-04-29,Microsoft Q3 Preview: AI CapEx Moment Of Truth (NASDAQ:MSFT) - Seeking Alpha,positive,0.3182,MSFT
+2025-04-28,How Will MSFT Stock React To Its Upcoming Earnings? - Forbes,neutral,0.0,MSFT
+2025-04-29,Microsoft (NasdaqGS:MSFT) Expands AI and Cloud Collaborations with Health Catalyst and IBM - simplywall.st,positive,0.1027,MSFT
+2025-04-29,Microsoft (MSFT) Is About to Report Q3 Earnings Tomorrow. Here’s What to Expect - TipRanks,neutral,0.0,MSFT
+2025-04-23,Is Microsoft Corporation (MSFT) the Best Stock to Buy and Hold for 20 Years? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-24,"Jim Cramer Slams Microsoft Corporation (MSFT)’s Spending: ‘$80 Billion Isn’t Enough, Partner’ - Yahoo Finance",neutral,0.0,MSFT
+2025-04-26,Is Microsoft Corporation (MSFT) the Best Safe Stock to Buy According to Hedge Funds? - Yahoo Finance,positive,0.7964,MSFT
+2025-04-14,Is Microsoft Corporation (MSFT) the Best Technology Dividend Stock to Invest in? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-25,Is Microsoft Corporation (MSFT) the Best Stock to Invest in for Long Term? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-26,Microsoft Corporation (MSFT): Among Billionaire Steve Cohen’s Large-Cap Stock Picks With Huge Upside Potential - Yahoo Finance,positive,0.3182,MSFT
+2025-04-25,Is MSFT Stock A Winner Now? - Forbes,positive,0.5859,MSFT
+2025-04-28,"MICROSOFT Earnings Preview: Recent $MSFT Insider Trading, Hedge Fund Activity, and More - Nasdaq",neutral,0.0,MSFT
+2025-04-25,Microsoft (MSFT) Earnings Preview: AI Growth vs. Market Uncertainty - tastylive,positive,0.0516,MSFT
+2025-04-28,Analysts Cut Price Targets on Microsoft Stock (MSFT) Ahead of Q3 Earnings Report - TipRanks,negative,-0.2732,MSFT
+2025-04-28,"3 trending stocks analysis: MSFT stock, AMZN stock, AMD stock - Markets.com",neutral,0.0,MSFT
+2025-04-14,Buy MSFT Stock At $400? - Forbes,neutral,0.0,MSFT
+2025-04-25,"Forget Oil Stocks, Buy Microsoft (NASDAQ:MSFT) - Seeking Alpha",negative,-0.2263,MSFT
+2025-04-14,Microsoft (MSFT) Stock Slides as Market Rises: Facts to Know Before You Trade - Yahoo Finance,neutral,0.0,MSFT
+2025-04-26,Microsoft (MSFT) Earnings Report: Is the Stock a Long-Term Buy? - paginasiete.bo,neutral,0.0,MSFT
+2025-04-24,Dan Niles Says Microsoft (MSFT) AI Capex Is Slowing Down - Yahoo Finance,neutral,0.0,MSFT
+2025-04-11,Is Microsoft Corp. (NASDAQ:MSFT) the Best Tech Stock to Buy For Long-Term Investment? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-25,"‘Wait for an Expectations Reset before Buying,’ Says Analyst about Microsoft Stock (MSFT) - TipRanks",neutral,0.0,MSFT
+2025-04-23,Microsoft (MSFT) Beats Stock Market Upswing: What Investors Need to Know - Nasdaq,neutral,0.0,MSFT
+2025-04-28,Microsoft has 'derisked' setup going into earnings: Jefferies (MSFT:NASDAQ) - Seeking Alpha,neutral,0.0,MSFT
+2025-04-08,Is Microsoft Corporation (MSFT) the Best Stock to Buy According to Billionaire Steve Cohen? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-10,Is Microsoft Corporation (MSFT) the Top Tech Stock to Buy According to Billionaire Ken Fisher? - Yahoo Finance,positive,0.2023,MSFT
+2025-03-31,Microsoft (MSFT) Stock Sinks As Market Gains: What You Should Know - Nasdaq,positive,0.34,MSFT
+2025-04-28,Microsoft (MSFT) technical analysis - Microsoft (NASDAQ:MSFT) - Benzinga,neutral,0.0,MSFT
+2025-04-09,Is Microsoft (MSFT) the Best Big Data Stock to Buy According to Analysts? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-23,Is Microsoft Corporation (MSFT) the Best Nancy Pelosi Stock To Invest In Now? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-29,Jim Cramer on Microsoft Corporation (MSFT): “Penalty will be severe” – Azure Must Deliver or Face PE Pressure - Insider Monkey,negative,-0.296,MSFT
+2025-04-11,Microsoft Corporation (MSFT) Is A Good Pick for A Long-Term Stock Portfolio - Yahoo Finance,positive,0.4404,MSFT
+2025-04-28,Is Microsoft (MSFT) the Most Profitable Blue Chip Stock to Buy Now? - Insider Monkey,positive,0.4927,MSFT
+2025-04-28,Microsoft: What To Consider Ahead Of The Q2 2025 Earnings Event (NASDAQ:MSFT) - Seeking Alpha,neutral,0.0,MSFT
+2025-03-31,"Microsoft Stock Falls Eight Of The Past Nine Weeks; Is MSFT Still A Buy In March, Or Is It A Sell? - Investor's Business Daily",neutral,0.0,MSFT
+2025-04-06,Is Microsoft Corporation (MSFT) the Best Beginner Stock? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-16,Is Microsoft (MSFT) the Best NASDAQ Stock to Buy So Far in 2025? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-01,Why Microsoft Stock Is Down? MSFT Share Tests 15-Month Low but 2025 Price Predictions Remain Bullish - Finance Magnates,neutral,0.0129,MSFT
+2025-04-07,Is Microsoft Corporation (MSFT) the Most Profitable Dividend Stock to Buy Now? - Yahoo Finance,positive,0.4927,MSFT
+2025-04-28,OpenAI integrates shopping features into ChatGPT (MSFT:NASDAQ) - Seeking Alpha,neutral,0.0,MSFT
+2025-04-19,Is Microsoft Corporation (MSFT) the Best Metaverse Stock to Invest in? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-13,"Microsoft (MSFT) Hits $13B AI Revenue Run Rate, Plans $80B Investment - Yahoo Finance",neutral,0.0,MSFT
+2025-04-10,Microsoft (MSFT) – Jim Cramer Conflicted: “I’m Calling It Somewhat of a Bus” - Yahoo Finance,neutral,0.0,MSFT
+2025-04-17,"It’s a Good Time to Buy GOOG and MSFT, Veteran Investor Says - Yahoo Finance",positive,0.4404,MSFT
+2025-04-16,Is Microsoft Corporation (MSFT) the Best Blue Chip Stock to Buy According to Billionaires? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-14,"Microsoft: With The Stock Down, Just Roll Down This Strategy (NASDAQ:MSFT) - Seeking Alpha",neutral,0.0,MSFT
+2025-04-21,Is Microsoft Corporation (MSFT) the Best Stock to Buy According to Billionaire Chris Rokos? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-12,Is Microsoft Corp. (NASDAQ:MSFT) a NASDAQ Stock with the Highest Upside Potential? - Yahoo Finance,neutral,0.0,MSFT
+2025-03-30,Is Microsoft Corporation (MSFT) Best Stock to Buy for the Next 3 Months? - Yahoo Finance,positive,0.6369,MSFT
+2025-04-08,How Microsoft Stock (MSFT) Became Ensnared in Trump’s Tariff Headwinds - markets.businessinsider.com,neutral,0.0,MSFT
+2025-04-12,"AAPL, AMZN, or MSFT: Which Magnificent 7 Stock Is Wall Street’s Most Attractive Pick? - TipRanks",positive,0.796,MSFT
+2025-04-16,"Veteran Analyst Is Bullish on NVDA, MSFT, AVGO - Yahoo Finance",neutral,0.0,MSFT
+2025-04-09,“Middle Management” Cuts Coming to Microsoft as Microsoft Stock (NASDAQ:MSFT) Surges - TipRanks,negative,-0.296,MSFT
+2025-04-07,Microsoft (MSFT) Dips More Than Broader Market: What You Should Know - Yahoo Finance,neutral,0.0,MSFT
+2025-04-23,Microsoft Stock (NASDAQ:MSFT) Gains on an AI Model that Runs on CPUs - markets.businessinsider.com,positive,0.34,MSFT
+2025-04-28,Microsoft (MSFT)Stock Forecast Faces AI Spending Scrutiny Ahead of Earnings - paginasiete.bo,neutral,0.0,MSFT
+2025-04-10,"Microsoft (MSFT): Buy, Sell, or Hold Post Q4 Earnings? - Yahoo Finance",neutral,0.0,MSFT
+2025-04-21,"Microsoft: Not A Strong Buy, But Don't Drop This Stock (MSFT) - Seeking Alpha",positive,0.0951,MSFT
+2025-04-15,Should You Hold Microsoft (MSFT) Amid Weak Operating Conditions? - Yahoo Finance,negative,-0.4404,MSFT
+2025-04-22,MSFT Quantitative Stock Analysis - Warren Buffett - Nasdaq,neutral,0.0,MSFT
+2025-04-25,Microsoft set to rebound with less aggressive Azure expectations: Evercore (MSFT:NASDAQ) - Seeking Alpha,negative,-0.079,MSFT
+2025-04-02,Is Most-Watched Stock Microsoft Corporation (MSFT) Worth Betting on Now? - Yahoo Finance,positive,0.2263,MSFT
+2025-04-24,Microsoft Is Dominating The Business AI Race (NASDAQ:MSFT) - Seeking Alpha,negative,-0.296,MSFT
+2025-04-28,Nvidia Stock: False Narrative (NASDAQ:NVDA) - Seeking Alpha,neutral,0.0,NVDA
+2025-04-29,"QCOM, NVDA, or AVGO: Which Chip Stock Is the Best Pick, According to Wall Street Analysts? - TipRanks",positive,0.6369,NVDA
+2025-04-29,NVIDIA (NASDAQ: NVDA) Price Prediction and Forecast 2025-2030 for April 29 - 24/7 Wall St.,neutral,0.0,NVDA
+2025-04-27,NVIDIA Corporation (NVDA) Price Target Cut to $125 Amid Rising AI Capex Uncertainty - Yahoo Finance,negative,-0.5423,NVDA
+2025-04-29,"Brad Gerstner Says He’s Buying NVIDIA (NVDA) Amid ‘Off The Charts’ GPU Demand, Secular Growth - Yahoo Finance",positive,0.2732,NVDA
+2025-04-29,Is NVIDIA Corporation (NVDA) the Worst-Performing Blue Chip Stock So Far in 2025? - Yahoo Finance,neutral,0.0,NVDA
+2025-04-29,"NVIDIA (NVDA) Stock: Why This Investor Says ""Time to Pull the Trigger"" - MoneyCheck",neutral,0.0,NVDA
+2025-04-24,Josh Brown Explains Long-Term Threats to Nvidia (NVDA) - Yahoo Finance,negative,-0.4215,NVDA
+2025-04-29,Nvidia: Time To Go All In (NASDAQ:NVDA) - Seeking Alpha,neutral,0.0,NVDA
+2025-04-25,Nvidia's Stock Is Trading As If It's 2022 Again (NVDA) - Seeking Alpha,neutral,0.0,NVDA
+2025-04-28,Is NVIDIA Corporation (NVDA) the Most Profitable Blue Chip Stock to Buy Now? - Yahoo Finance,positive,0.4927,NVDA
+2025-04-29,Here’s Why NVIDIA Corporation (NVDA) Fell in Q1 - Yahoo Finance,neutral,0.0,NVDA
+2025-04-23,Why Two CNBC Panelists Were Very Bearish on Nvidia (NVDA) Stock - Yahoo Finance,neutral,0.0,NVDA
+2025-04-23,Is NVIDIA Corp. (NASDAQ:NVDA) the Best Stock Under $100 to Buy According to Hedge Funds? - Yahoo Finance,positive,0.6369,NVDA
+2025-04-28,NVIDIA Corporation (NVDA): Among Billionaire Israel Englander’s Stock Picks with Huge Upside Potential - Yahoo Finance,positive,0.3182,NVDA
+2025-04-29,Is NVIDIA Corporation (NASDAQ: NVDA) the Worst-Performing Blue Chip Stock So Far in 2025? - paginasiete.bo,neutral,0.0,NVDA
+2025-04-29,NVIDIA (NVDA) Stock Price & Prediction: Is This the Top Pick for Self-Driving Car Exposure? - CoinCentral,positive,0.2023,NVDA
+2025-04-21,Jim Cramer Says NVIDIA (NVDA) Stock Isn’t Cheap ‘Unless Everything Goes Right’ - Yahoo Finance,neutral,0.0,NVDA
+2025-04-21,Why Nvidia (NVDA) Shares Are Getting Obliterated Today - Yahoo Finance,negative,-0.2263,NVDA
+2025-04-29,"NVDA Stock Slips Again as Competition Intensifies, AI Hype Fades - FXLeaders",neutral,0.0,NVDA
+2025-04-29,"QCOM, NVDA, or AVGO: Which Chip Stock Is the Best Pick, According to Wall Street Analysts? - paginasiete.bo",positive,0.6369,NVDA
+2025-04-28,Nvidia Drops 19% YTD: Is NVDA Stock Cheap Enough To Buy? - Barchart.com,neutral,0.0,NVDA
+2025-04-29,NVIDIA Corporation (NVDA): Among Billionaire Andreas Halvorsen’s Stock Picks With Huge Upside Potential - Insider Monkey,positive,0.3182,NVDA
+2025-04-16,Why Nvidia (NVDA) Stock Is Down Today - Yahoo Finance,neutral,0.0,NVDA
+2025-04-21,Veteran Investor Says NVDA Can Reach $130 After Earnings - Insider Monkey,neutral,0.0258,NVDA
+2025-04-21,Veteran Investor Says NVDA Can Reach $130 After Earnings - MSN,neutral,0.0258,NVDA
+2025-04-14,Nvidia (NVDA) Stock Slides as Market Rises: Facts to Know Before You Trade - Yahoo Finance,neutral,0.0,NVDA
+2025-04-14,Is NVIDIA Corporation (NVDA) the Best Growth Stock to Buy According to Billionaires? - Yahoo Finance,positive,0.7783,NVDA
+2025-04-29,NVIDIA (NASDAQ:NVDA) Shares Down 3.4% on Analyst Downgrade - MarketBeat,positive,0.296,NVDA
+2025-04-21,"NVDA, CRM, or GOOGL: Which Tech Stock Is the Most Attractive Pick? - TipRanks",positive,0.4927,NVDA
+2025-04-28,Analysts Sound Caution on Pfizer Stock (PFE) Ahead of Q1 Earnings - TipRanks,neutral,0.0,PFE
+2025-04-28,Pfizer (NYSE:PFE) Unveils Promising Preclinical Data On First-In-Class Oncology Drug - Yahoo Finance,positive,0.4019,PFE
+2025-04-29,"4 stocks to watch on Tuesday: KO, PFE, GM and UPS (KO:NYSE) - Seeking Alpha",neutral,0.0,PFE
+2025-04-27,"Earnings week ahead: MSFT, AAPL, META, AMZN, QCOM, PFE, MA, V, PYPL, ROKU, MCD, SBUX, KO, and more - Seeking Alpha",neutral,0.0,PFE
+2025-04-30,Buy Pfizer (PFE) Stock for a Rebound After Crushing Q1 EPS Expectations? - Nasdaq,negative,-0.3612,PFE
+2025-04-29,Analysts Sound Caution on Pfizer Stock (PFE) Ahead of Q1 Earnings - The Globe and Mail,neutral,0.0,PFE
+2025-04-23,Pfizer (PFE) Stock Sinks As Market Gains: What You Should Know - Yahoo Finance,positive,0.34,PFE
+2025-04-29,$PFE stock is up 3% today. Here's what we see in our data. - Nasdaq,neutral,0.0,PFE
+2025-04-27,Pfizer Inc. (PFE): Among Billionaire Ken Fisher’s Healthcare Stock Picks with Massive Upside Potential - Yahoo Finance,neutral,0.0,PFE
+2025-04-11,Is Pfizer Inc. (PFE) A Cheap NYSE Stock to Invest in According to Hedge Funds? - Yahoo Finance,neutral,0.0,PFE
+2025-04-29,Pfizer (PFE) Stock: Can Strong Q1 Earnings Turn the Tide for this Fallen Giant? - MoneyCheck,positive,0.1091,PFE
+2025-04-29,"Compared to Estimates, Pfizer (PFE) Q1 Earnings: A Look at Key Metrics - Nasdaq",neutral,0.0,PFE
+2025-04-29,Pfizer (PFE) Q1 Revenue Falls Short of Expectations | PFE Stock News - GuruFocus,neutral,0.0,PFE
+2025-04-22,Jim Cramer Warns on Pfizer (PFE): “That 7.7% Yield Is Not a Sign of Strength – It’s a Sign of Weakness” - Yahoo Finance,positive,0.4215,PFE
+2025-04-17,Is Pfizer Inc. (PFE) the Best Large-Cap Value Stock to Buy as the Recession Hits? - Yahoo Finance,positive,0.5859,PFE
+2025-04-29,"Pfizer: Patent Cliff Nears, Danuglipron Dreams Fade Away (NYSE:PFE) - Seeking Alpha",positive,0.4019,PFE
+2025-04-08,Is Pfizer (PFE) Stock Undervalued Right Now? - Yahoo Finance,neutral,0.0,PFE
+2025-04-09,Is Pfizer Stock (PFE) Worth Buying on the Dip? - TipRanks,positive,0.2263,PFE
+2025-04-13,Pfizer Stock: This Falling Knife Keeps Going Lower And Lower (NYSE:PFE) - Seeking Alpha,negative,-0.631,PFE
+2025-04-14,"Pfizer Inc. (PFE): “Dead Money… Close the Casket,” Says Jim Cramer - Yahoo Finance",neutral,0.0,PFE
+2025-04-24,PFE vs. LLY: Which Stock Should Value Investors Buy Now? - Yahoo Finance,positive,0.34,PFE
+2025-04-23,Pfizer Earnings Preview: Pharma May Plumb New Depths After Obesity Drug Debacle (NYSE:PFE) - Seeking Alpha,neutral,0.0,PFE
+2025-04-19,Pfizer Inc. (PFE): Among Jeff Smith’s Top Activist Targets - Yahoo Finance,positive,0.2023,PFE
+2025-04-02,Potential Stock Woe Ahead as Pfizer (PFE) Riles Donald Trump - Yahoo Finance,negative,-0.4215,PFE
+2025-04-11,Here is What to Know Beyond Why Pfizer Inc. (PFE) is a Trending Stock - Yahoo Finance,neutral,0.0,PFE
+2025-04-27,Pfizer: I Am Locking In 7.5% Dividend Yield Before Earnings (NYSE:PFE) - Seeking Alpha,neutral,0.0,PFE
+2025-04-15,$PFE stock is up 2% today. Here's what we see in our data. - Nasdaq,neutral,0.0,PFE
+2025-03-18,Analyst Says Pfizer (PFE) Stock Will ‘Move Too Fast to Catch’ - Yahoo Finance,neutral,0.0,PFE
+2025-04-01,Is Pfizer Inc. (PFE) the Most Undervalued Healthcare Stock to Buy According to Analysts? - Yahoo Finance,neutral,0.0,PFE
+2025-04-21,Pfizer Inc. (PFE): One of the Safe Dividend Stocks with Yields Above 5% - Yahoo Finance,positive,0.4404,PFE
+2025-04-05,"Pfizer (NYSE:PFE) sheds US$13b, company earnings and investor returns have been trending downwards for past three years - Yahoo Finance",neutral,0.0,PFE
+2025-04-22,Analysts Estimate Pfizer (PFE) to Report a Decline in Earnings: What to Look Out for - Yahoo Finance,neutral,0.0,PFE
+2025-04-09,Is Pfizer Stock (PFE) Worth Buying on the Dip? - markets.businessinsider.com,positive,0.2263,PFE
+2025-04-17,Pfizer (PFE) Laps the Stock Market: Here's Why - Yahoo Finance,neutral,0.0,PFE
+2025-03-19,Pfizer (PFE) Stock Dips While Market Gains: Key Facts - Yahoo Finance,positive,0.34,PFE
+2025-03-31,Is Trending Stock Pfizer Inc. (PFE) a Buy Now? - Nasdaq,neutral,0.0,PFE
+2025-03-30,Pfizer Inc. (PFE): Among Blue Chip Stocks to Invest in at 52-Week Lows - Yahoo Finance,negative,-0.2023,PFE
+2025-01-28,Pfizer (PFE) Stock Drops Despite Market Gains: Important Facts to Note - Yahoo Finance,negative,-0.3875,PFE
+2025-04-17,"Pharma Stock Roundup: J&J's Q1 Results, PFE's Obesity Setback - Yahoo Finance",neutral,0.0,PFE
+2025-04-14,"Pfizer, Inc. (PFE) Stock Forecasts - Yahoo Finance",neutral,0.0,PFE
+2025-03-27,Unpacking Q4 Earnings: Pfizer (NYSE:PFE) In The Context Of Other Branded Pharmaceuticals Stocks - Yahoo Finance,neutral,0.0,PFE
+2025-03-08,Is Pfizer Inc. (PFE) The Best Cheap Dividend Stock To Buy Right Now? - Yahoo Finance,positive,0.6369,PFE
+2025-02-27,Is Pfizer Inc. (PFE) the Best Stock Under $50 to Buy Right Now? - Yahoo Finance,positive,0.6369,PFE
+2025-03-12,Is Pfizer Inc. (PFE) the Best Pharma Stock to Buy According to Hedge Funds? - Yahoo Finance,positive,0.6369,PFE
+2025-04-22,Pfizer Inc. (NYSE: PFE) Stock: Can New Drug Pipeline Rescue Tumbling Share Price? - CoinCentral,positive,0.6705,PFE
+2025-03-07,Pfizer Inc. (PFE) Is a Trending Stock: Facts to Know Before Betting on It - Yahoo,neutral,0.0,PFE
+2025-03-10,3 Reasons PFE is Risky and 1 Stock to Buy Instead - Yahoo Finance,negative,-0.2023,PFE
+2025-04-02,"PFE, MRK, LLY & Other Drug Stocks Down Amid Tariff Jitters - Yahoo Finance",neutral,0.0,PFE
+2025-03-21,"Pharma Stock Roundup: PFE's Final Haleon Stake Sale, AZN, SNY M&A Deals - Yahoo Finance",neutral,0.0,PFE
+2025-03-01,Is Pfizer Inc. (PFE) the Best Affordable Dividend Stock to Buy According to Hedge Funds? - Yahoo Finance,positive,0.6369,PFE
+2025-04-03,JNJ vs. PFE: Which Drug Giant is a Better Buy Now? - Yahoo Finance,positive,0.4404,PFE
+2025-04-14,Pfizer (NYSE:PFE) Discontinues Danuglipron Development After Safety Review in Study - Yahoo Finance,positive,0.4215,PFE
+2025-04-14,Pfizer stock slips after dropping weight loss drug (PFE:NYSE) - Seeking Alpha,negative,-0.3182,PFE
+2025-02-05,Should You Pick PFE Stock At $25? - Forbes,neutral,0.0,PFE
+2025-03-23,"With 67% ownership, Pfizer Inc. (NYSE:PFE) boasts of strong institutional backing - Yahoo Finance",positive,0.5267,PFE
+2025-04-30,Pfizer Inc. (PFE) Q1 2025 Earnings Call Transcript,neutral,0.0,PFE
+2025-04-30,"4 stocks to watch on Tuesday: KO, PFE, GM and UPS",neutral,0.0,PFE
+2025-04-30,"Earnings week ahead: MSFT, AAPL, META, AMZN, QCOM, PFE, MA, V, PYPL, ROKU, MCD, SBUX, KO, and more",neutral,0.0,PFE
+2025-04-29,Is Eli Lilly and Company (LLY) the Best Long-Term Dividend Stock to Buy According to Billionaires? - Yahoo Finance,positive,0.6369,LLY
+2025-04-28,"Going Into Earnings, Is Eli Lilly Stock a Buy, a Sell, or Fairly Valued? - Morningstar",positive,0.4404,LLY
+2025-04-28,"Stocks making the biggest moves premarket: Boeing, Domino's Pizza, Eli Lilly, Progressive and more - CNBC",neutral,0.0,LLY
+2025-04-29,"LLY, NFLX, ARM: 3 Stocks Set for Long-Term Success, According to Analysts - TipRanks",positive,0.5719,LLY
+2025-04-28,Eli Lilly Stock Moves Lower on Rare Double Downgrade - Schaeffer's Investment Research,negative,-0.296,LLY
+2025-04-29,How Will Eli Lilly Stock React To Its Upcoming Earnings? - Trefis,neutral,0.0,LLY
+2025-04-27,Eli Lilly and Company (LLY): Among Billionaire Ken Fisher’s Healthcare Stock Picks with Massive Upside Potential - Yahoo Finance,neutral,0.0,LLY
+2025-04-29,Is Eli Lilly Stock (LLY) a Buy Ahead of Earnings Despite a Rare Downgrade? - TipRanks,neutral,0.0,LLY
+2025-04-29,Will History Repeat With LLY Stock Post Earnings? - Forbes,neutral,0.0,LLY
+2025-04-29,Eli Lilly Stock Gets a Double Downgrade. Where Weight-Loss Drugs Go From Here. - Barron's,neutral,0.0,LLY
+2025-04-29,Eli Lilly Stock (LLY) Is Double Downgraded Ahead of Earnings - The Globe and Mail,neutral,0.0,LLY
+2025-04-28,"Eli Lilly Stock Gets A Double Downgrade And Price Target Cut By HSBC Over Valuation, Competition Concerns - MSN",negative,-0.2732,LLY
+2025-04-13,Eli Lilly Stock: Some Big News Is Incoming (NYSE:LLY) - Seeking Alpha,neutral,0.0,LLY
+2025-04-17,Why Is Eli Lilly (LLY) Stock Rocketing Higher Today - Yahoo Finance,neutral,0.0,LLY
+2025-04-29,WW International stock rises on plans to offer Lilly's Zepbound - Seeking Alpha,neutral,0.0,LLY
+2025-04-29,Jim Cramer on Eli Lilly and Company (LLY): “Riding the wave of GLP-1 success” – Ready to Rebound After a Rare Miss - Yahoo Finance,positive,0.2263,LLY
+2025-04-09,Trump-Powered Medicare Setback Adds Bullish Impetus for Eli Lilly & Co (LLY) Stock - TipRanks,neutral,0.0,LLY
+2025-04-25,Analysts Maintain Buy Ratings on Eli Lilly Stock (LLY) as Q1 Earnings Loom - Yahoo Finance,negative,-0.2263,LLY
+2025-04-25,Is Eli Lilly and Company (LLY) the Best Stock to Invest in for Long Term? - Yahoo Finance,positive,0.6369,LLY
+2025-04-28,"HSBC cuts Eli Lilly stock rating to Reduce, target to $700 - Investing.com",negative,-0.296,LLY
+2025-04-21,Should You Buy Eli Lilly Stock At $820? - Nasdaq,neutral,0.0,LLY
+2025-04-29,Eli Lilly (LLY) Teams Up with WeightWatchers for Enhanced Pharma - GuruFocus,neutral,0.0,LLY
+2025-04-29,Eli Lilly (LLY) Partners with Creyon Bio for RNA-Targeted Therap - GuruFocus,neutral,0.0,LLY
+2025-04-24,PFE vs. LLY: Which Stock Should Value Investors Buy Now? - Yahoo Finance,positive,0.34,LLY
+2025-04-21,LLY Stock Up as Oral GLP-1 Pill Meets Goals in First Phase III Study - Yahoo Finance,neutral,0.0,LLY
+2025-04-17,Eli Lilly Stock Rockets On Weight-Loss Pill Progress - Investor's Business Daily,positive,0.4215,LLY
+2025-04-27,"ISRG, LLY, or DXCM: Which “Strong Buy” Healthcare Stock Has the Highest Upside Potential? - TipRanks",neutral,0.0,LLY
+2025-04-23,"Stocks making the biggest moves premarket: Boeing, Tesla, BP, Eli Lilly and more - CNBC",neutral,0.0,LLY
+2025-04-23,Is Eli Lilly and Company (LLY) the Best Stock That Will Always Grow? - Yahoo Finance,positive,0.6369,LLY
+2025-04-28,Is Eli Lilly Stock a Portfolio Must-Have Pre-Q1 Earnings? (Revised) - Yahoo Finance,neutral,0.0,LLY
+2025-04-25,Eli Lilly Stock (LLY) is Stronger as it Fights for Alzheimer’s Drug Approval in Europe - TipRanks,positive,0.4588,LLY
+2025-04-16,Eli Lilly Stock Down 8.2% in a Month: Should You Buy the Dip? - Yahoo Finance,neutral,0.0,LLY
+2025-04-14,Eli Lilly (LLY) Sees Price Target Reduced by Guggenheim Ahead of Earnings | LLY Stock News - GuruFocus,neutral,0.0,LLY
+2025-04-28,Eli Lilly stock gets a rare downgrade: what is HSBC concerned about? - TradingView,neutral,0.0,LLY
+2025-04-15,Eli Lilly and Company (LLY): One of the High Growth Forever Dividend Stocks to Invest In - Yahoo Finance,positive,0.3818,LLY
+2025-04-25,Eli Lilly Will Be the Next $1 Trillion Stock - 24/7 Wall St.,neutral,0.0,LLY
+2025-04-06,Is Eli Lilly and Company (LLY) the Best Beginner Stock? - Yahoo Finance,positive,0.6369,LLY
+2025-04-17,Eli Lilly stock soars on positive weight-loss pill results - Yahoo Finance,positive,0.5574,LLY
+2025-04-08,LLY vs. NVO: Which Weight-Loss Drug Stock is a Stronger Play Now? - Yahoo Finance,positive,0.6124,LLY
+2025-04-28,"Eli Lilly: Why Orforglipron Matters, A Lot (NYSE:LLY) - Seeking Alpha",neutral,0.0258,LLY
+2025-04-10,Q4 Earnings Highs And Lows: Eli Lilly (NYSE:LLY) Vs The Rest Of The Branded Pharmaceuticals Stocks - Yahoo Finance,negative,-0.2023,LLY
+2025-04-07,NVO & LLY Shares Down on Exclusion of Obesity Drugs From Medicare - Yahoo Finance,neutral,0.0,LLY
+2025-04-29,HSBC Downgrades Eli Lilly (LLY) with Reduced Price Target | LLY Stock News - GuruFocus,neutral,0.0,LLY
+2025-04-14,Eli Lilly (LLY) Stock Jumps as Rival Pfizer Drops Out of Race to Develop Weight Loss Pill - TipRanks,negative,-0.3182,LLY
+2025-03-29,Eli Lilly and Company (LLY): Among Billionaire Ken Fisher’s Top Growth Stock Picks - Yahoo Finance,positive,0.5267,LLY
+2025-04-29,Eli Lilly (LLY) Poised for Growth with Promising Drug Developmen - GuruFocus,positive,0.743,LLY
+2025-04-19,Is Eli Lilly and Company (LLY) the Best Low Volatility Stock to Buy Now? - Yahoo Finance,positive,0.4767,LLY
+2025-04-11,Why Eli Lilly and Company (LLY) Is the Best Medical Stock to Buy According to Billionaires - Yahoo Finance,positive,0.6369,LLY
+2025-04-09,Eli Lilly and Company (LLY): One of the High Growth Dividend Paying Stocks to Invest in - Yahoo Finance,positive,0.3818,LLY
+2025-04-09,Eli Lilly & Company (LLY): Among Defensive Stocks Billionaire Ken Fisher Is Betting On - Yahoo Finance,neutral,0.0258,LLY
+2025-04-08,Eli Lilly and Company (LLY) is Attracting Investor Attention: Here is What You Should Know - Yahoo Finance,positive,0.4767,LLY
+2025-04-08,Eli Lilly stock upgraded at Goldman Sachs (LLY:NYSE) - Seeking Alpha,neutral,0.0,LLY
+2025-04-18,Eli Lilly (NYSE: LLY) Stock Price Prediction and Forecast 2025-2030 (April 2025) - 24/7 Wall St.,neutral,0.0,LLY
+2025-04-23,Eli Lilly Stock (LLY) Back in Shape as It Sues Compounders Over Weight-Loss Drugs - TipRanks,neutral,0.0,LLY
+2025-03-18,Eli Lilly And Company (LLY): Among Stocks to Buy That May Be Splitting Soon - Yahoo Finance,neutral,0.0,LLY
+2025-04-15,Bernstein: 'Eli Lilly (LLY) Keeps Taking Share' - StreetInsider,positive,0.296,LLY
+2025-03-25,Eli Lilly (LLY) Stock Sinks As Market Gains: Here's Why - Nasdaq,positive,0.34,LLY
+2025-04-22,Clinical Trial Success Positions Eli Lilly Stock (LLY) for Major Rebound - TipRanks,positive,0.5719,LLY
+2025-04-17,$LLY stock is up 14% today. Here's what we see in our data. - Nasdaq,neutral,0.0,LLY
+2025-04-28,Eli Lilly (NYSE: LLY) Stock Hit by Double Downgrade and Price Target Cut from HSBC on Valuation and Competition Concerns - paginasiete.bo,negative,-0.2732,LLY
+2025-04-17,Pharmaceutical Giant Eli Lilly Schedules Q1 2025 Earnings Report: Key Date for Investors - Stock Titan,neutral,0.0,LLY
+2025-04-04,"Eli Lilly, Novo Stocks Dive After Medicare Excludes Weight-Loss Drugs - Investor's Business Daily",neutral,0.0,LLY
+2025-04-28,This Eli Lilly Analyst Turns Bearish; Here Are Top 4 Downgrades For Monday - Benzinga,positive,0.2023,LLY
+2025-04-17,Eli Lilly stock jumps on Phase 3 win for oral GLP-1 (LLY:NYSE) - Seeking Alpha,positive,0.5859,LLY
+2025-04-01,Is Eli Lilly and Company (LLY) the Best Gene-Editing Stock to Buy? - Yahoo Finance,positive,0.6369,LLY
+2025-03-14,Is Eli Lilly and Company (LLY) the Best Quality Stock to Invest in Now? - Yahoo Finance,positive,0.6369,LLY
+2025-04-14,"Why Eli Lilly, Novo Nordisk, and Viking Therapeutics Stocks All Popped Today - The Motley Fool",negative,-0.4404,LLY
+2025-04-17,Why It Makes Sense To Buy Eli Lilly Stock At $840 - Forbes,neutral,0.0,LLY
+2025-04-10,"Select Medical, Phreesia, Eli Lilly, Pfizer, and Brink's Shares Are Falling, What You Need To Know - Yahoo Finance",positive,0.1531,LLY
+2025-04-09,"Why Roche Holding, Eli Lilly, and AstraZeneca Stocks Dropped Today - Yahoo Finance",neutral,0.0,LLY
+2025-03-18,Eli Lilly (LLY) Stock Moves -0.27%: What You Should Know - Yahoo Finance,neutral,0.0,LLY
+2025-02-06,Eli Lilly (LLY) Stock Eyes Price Breakout as Q4 Results Loom - Yahoo Finance,negative,-0.2263,LLY
+2025-03-02,LLY Stock: Should You Buy After A 20% Rise? - Forbes,neutral,0.0,LLY
+2025-04-17,Lilly Soars After Pill Shows Its as Good as Ozempic - Bloomberg.com,positive,0.4404,LLY
+2025-04-23,Eli Lilly Nails Oral GLP-1 Trial—Here’s What It Means for LLY - MarketBeat,neutral,0.0,LLY
+2025-02-22,Eli Lilly (NYSE:LLY) stock performs better than its underlying earnings growth over last five years - Yahoo Finance,positive,0.6705,LLY
+2025-04-15,"NVO, LLY, GPCR & VKTX Stocks Gain Following PFE's Obesity Study Setback - Yahoo Finance",positive,0.5267,LLY
+2025-03-10,Why Eli Lilly Stock Flopped Today - Yahoo Finance,neutral,0.0,LLY
+2025-04-21,Strength Seen in Lilly (LLY): Can Its 14.3% Jump Turn into More Strength? - Nasdaq,positive,0.7713,LLY
+2025-03-08,Eli Lilly and Company (LLY): Jim Cramer Says ‘Don’t Sell’ – A Visionary Stock to Hold! - Yahoo Finance,positive,0.5707,LLY
+2025-03-25,Is Eli Lilly and Company (NYSE:LLY) The Best Stocks to Buy Now For the Long Term? - Yahoo Finance,positive,0.6369,LLY
+2025-02-13,LLY Rises More Than 4% in a Week: How to Play the Stock - Nasdaq,positive,0.34,LLY
+2025-04-21,Eli Lilly and Company (LLY): Among the Best American Dividend Stocks to Buy According to Analysts - Yahoo Finance,positive,0.6369,LLY
+2025-03-24,Is Eli Lilly and Company (LLY) The Best Healthcare Dividend Stock to Invest in? - Yahoo Finance,positive,0.6369,LLY
+2025-04-15,Is Eli Lilly and Company (LLY) the Best Pharma Stock to Buy for Long Term Growth? - Yahoo Finance,positive,0.7783,LLY
+2025-03-04,Eli Lilly and Company (LLY) Is a Trending Stock: Facts to Know Before Betting on It - Yahoo Finance,neutral,0.0,LLY
+2025-04-18,Eli Lilly and Company (LLY): One of the Best Long Term Stocks to Buy According to Billionaires - Yahoo Finance,positive,0.6369,LLY
+2025-03-12,Is Eli Lilly and Company (LLY) the Best Pharma Stock to Buy According to Hedge Funds? - Yahoo Finance,positive,0.6369,LLY
+2025-04-09,"Top Stock Movers Now: Delta, Apple, Eli Lilly, and More - Investopedia",positive,0.2023,LLY
+2025-02-08,Eli Lilly and Company (LLY): Among Ken Fisher’s Top High Growth Stock Picks - Yahoo Finance,positive,0.5267,LLY
+2025-04-24,Eli Lilly and Co (LLY) Shares Up 3.02% on Apr 24 - GuruFocus,positive,0.296,LLY
+2025-04-17,Why Eli Lilly (LLY) Stock is Rising Today - GuruFocus,neutral,0.0,LLY
+2025-03-11,"Eli Lilly Rises 7.5% YTD: Time to Buy, Sell or Hold the Stock? - Yahoo Finance",neutral,0.0,LLY
+2025-03-24,Was Jim Cramer Right About Eli Lilly and Company (LLY)? - Yahoo Finance,neutral,0.0,LLY
+2025-03-18,Jim Cramer Says Eli Lilly And Co (LLY) Sellers Are ‘Uninformed’ - Yahoo Finance,neutral,0.0,LLY
+2025-04-09,Eli Lilly CEO David Ricks Just Delivered Terrible News to Investors: Should You Sell the Stock? - The Motley Fool,negative,-0.7184,LLY
+2025-03-31,Eli Lilly (NYSE:LLY) Unveils Positive Phase 2 Results For Heart Disease Therapy Amid 5% Share Dip - Yahoo Finance,positive,0.875,LLY
+2025-04-17,Why Eli Lilly and Company (LLY) is Skyrocketing? - Yahoo Finance,neutral,0.0,LLY
+2025-04-30,WW International rises on partnership to offer Eli Lilly's Zepbound,neutral,0.0,LLY
+2025-04-30,"Eli Lilly: Why Orforglipron Matters, A Lot",neutral,0.0258,LLY
+2025-04-30,Eli Lilly seeks a review of EU rejection of Alzheimer’s therapy,negative,-0.5423,LLY
+2025-04-30,Eli Lilly: Positioned For Robust Q1 As Orforglipron Enhances Long-Term Outlook,positive,0.34,LLY
+2025-04-29,Is Trending Stock RTX Corporation (RTX) a Buy Now? - Yahoo Finance,neutral,0.0,RTX
+2025-04-22,RTX Posted Strong Earnings. Why the Stock Is Tumbling. - Barron's,positive,0.5106,RTX
+2025-04-29,Defense Stocks Northrop Grumman and RTX Are Tanking. Is Lockheed Martin a Better Buy for Passive Income? - The Motley Fool,positive,0.3182,RTX
+2025-04-28,"Should You Buy, Hold or Sell RTX Stock Post Q1 Earnings Release? - Nasdaq",neutral,0.0,RTX
+2025-04-29,RTX Co. (NYSE:RTX) Shares Sold by Price T Rowe Associates Inc. MD - MarketBeat,positive,0.296,RTX
+2025-04-22,RTX Shares Drop on Potential $850 Million Hit From Trump Tariffs - Bloomberg.com,neutral,0.0258,RTX
+2025-04-28,RTX Corporation (RTX) Stock Analysis: Aerospace Giant Offers 10.44% Potential Upside - DirectorsTalk Interviews,neutral,0.0,RTX
+2025-04-14,Should You Buy RTX Stock At $125? - Forbes,neutral,0.0,RTX
+2025-04-22,RTX Earnings: A Bleak Outlook Slams RTX Stock Today - TipRanks,neutral,0.0,RTX
+2025-04-22,"Lockheed Martin, RTX Earnings Views; Northrop Grumman Misses - Investor's Business Daily",negative,-0.2263,RTX
+2025-04-29,Kovitz Investment Group Partners LLC Raises Stock Position in RTX Co. (NYSE:RTX) - MarketBeat,neutral,0.0,RTX
+2025-04-26,RTX Quantitative Stock Analysis - Nasdaq,neutral,0.0,RTX
+2025-04-23,What’s Happening With RTX Stock? - Forbes,neutral,0.0,RTX
+2025-04-22,Why RTX (RTX) Shares Are Falling Today - Yahoo Finance,positive,0.1531,RTX
+2025-04-22,Here's How RTX Shocked the Market Today (Hint: It's Tariff Related) - Yahoo Finance,negative,-0.3182,RTX
+2025-04-15,RTX (NYSE:RTX) Stock Surges 10% Over Last Week - Yahoo Finance,neutral,0.0,RTX
+2025-04-22,"RTX's $850M tariff hit, 3M stock gains, 3,521% solar tariff - Yahoo Finance",positive,0.34,RTX
+2025-04-15,RTX (RTX) Expected to Beat Earnings Estimates: Can the Stock Move Higher? - Yahoo Finance,neutral,0.0,RTX
+2025-04-28,RTX Corporation (RTX): Among the Best Military Drone Stocks to Buy Now - Yahoo Finance,positive,0.6369,RTX
+2025-04-22,"RTX cautions $850 million hit from Trump's tariffs over 2025, shares fall - Reuters",positive,0.296,RTX
+2025-04-29,RTX Co. (NYSE:RTX) Shares Bought by Mission Creek Capital Partners Inc. - MarketBeat,positive,0.296,RTX
+2025-04-22,"RTX's shares plunge on disappointing sales guidance, tariff worries (RTX:NYSE) - Seeking Alpha",negative,-0.5859,RTX
+2025-04-28,Cramer Says “Keep It” – RTX Corporation (RTX) Still Has Room to Fly - Yahoo Finance,neutral,0.0,RTX
+2025-04-26,"Verizon, Costco, McDonald’s, Strategy, RTX: Stock Shocks! - TipRanks",negative,-0.4389,RTX
+2025-04-22,Here's How RTX Shocked the Market Today (Hint: It's Tariff Related) - The Motley Fool,negative,-0.6369,RTX
+2025-04-29,RTX (NYSE:RTX) Stock Price Up 0.2% Following Analyst Upgrade - MarketBeat,neutral,0.0,RTX
+2025-04-22,"Tesla, Boeing, Northrop, RTX, 3M, GE Aerospace, Lockheed, Verizon, First Solar, and More Movers - Barron's",neutral,0.0,RTX
+2025-04-28,"Should You Buy, Hold Or Sell RTX Stock Post Q1 Earnings Release? - Barchart.com",neutral,0.0,RTX
+2025-04-24,Might the Nvidia RTX 5000 Series GPU Stock Woes Finally Be Over? Read the Dirt Here. - VICE,negative,-0.6486,RTX
+2025-04-23,"Lockheed, RTX Stocks Are Rising on Post-Earnings Upgrades - Barron's",neutral,0.0,RTX
+2025-04-23,$RTX stock is up 6% today. Here's what we see in our data. - Nasdaq,neutral,0.0,RTX
+2025-04-11,Time To Buy RTX Stock At $125? - Trefis,neutral,0.0,RTX
+2025-04-29,RTX Co. (NYSE:RTX) Holdings Cut by Arnhold LLC - MarketBeat,negative,-0.2732,RTX
+2025-04-07,Why RTX (RTX) is a Top Value Stock for the Long-Term - Yahoo Finance,positive,0.4939,RTX
+2025-04-23,Here's Why RTX (RTX) is a Strong Value Stock - Yahoo Finance,positive,0.6908,RTX
+2025-04-29,RTX Co. (NYSE:RTX) Shares Acquired by J. Stern & Co. LLP - MarketBeat,positive,0.296,RTX
+2025-04-14,RTX Corporation: A Resilient Aerospace Stock To Buy (NYSE:RTX) - Seeking Alpha,neutral,0.0,RTX
+2025-04-10,RTX or EADSY: Which Is the Better Value Stock Right Now? - Yahoo Finance,positive,0.6486,RTX
+2025-04-23,RTX Stock Still A Buy After Tariff Sell-Off (NYSE:RTX) - Seeking Alpha,neutral,0.0,RTX
+2025-03-29,RTX May Bag a $4.2 Billion Big-Blimp Bonanza - The Motley Fool,negative,-0.4404,RTX
+2025-04-29,MGO One Seven LLC Grows Position in RTX Co. (NYSE:RTX) - MarketBeat,neutral,0.0,RTX
+2025-04-24,Director’s Strategic Move: A Significant RTX Stock Purchase - TipRanks,positive,0.2023,RTX
+2025-04-28,UBS Group Issues Positive Forecast for RTX (NYSE:RTX) Stock Price - MarketBeat,positive,0.5574,RTX
+2025-04-29,"25,282 Shares in RTX Co. (NYSE:RTX) Acquired by Burling Wealth Partners LLC - MarketBeat",positive,0.6597,RTX
+2025-04-17,Should You Add RTX Stock to Your Portfolio Pre-Q1 Earnings Release? - Yahoo Finance,neutral,0.0,RTX
+2025-04-28,Susquehanna Cuts RTX (NYSE:RTX) Price Target to $140.00 - MarketBeat,negative,-0.296,RTX
+2025-04-22,"Earnings call transcript: RTX Q1 2025 earnings beat expectations, stock drops - Investing.com",neutral,0.0,RTX
+2025-04-27,RTX (NYSE:RTX) Stock Rating Upgraded by Morgan Stanley - MarketBeat,neutral,0.0,RTX
+2025-04-07,RTX Corporation's Dip Is An Opportunity (NYSE:RTX) - Seeking Alpha,positive,0.4215,RTX
+2025-04-14,Will RTX (RTX) Beat Estimates Again in Its Next Earnings Report? - Yahoo Finance,neutral,0.0,RTX
+2025-04-27,"James A. Winnefeld, Jr. Acquires 200 Shares of RTX Co. (NYSE:RTX) Stock - MarketBeat",positive,0.296,RTX
+2025-04-01,Is RTX Corporation (RTX) Stock Outpacing Its Aerospace Peers This Year? - Yahoo Finance,neutral,0.0,RTX
+2025-04-14,Time To Buy RTX Stock At $125? - Nasdaq,neutral,0.0,RTX
+2025-04-27,RTX Co. (NYSE:RTX) Shares Sold by Adage Capital Partners GP L.L.C. - MarketBeat,positive,0.296,RTX
+2025-04-16,RTX (RTX) Q1 Earnings Preview: What You Should Know Beyond the Headline Estimates - Yahoo Finance,neutral,0.0,RTX
+2025-04-23,"Lockheed, RTX Stocks Are Rising on Post-Earnings Upgrades - MSN",neutral,0.0,RTX
+2025-04-23,RTX vs. Lockheed Martin: Which Defense Stock to Consider in 2025? - TradingView,positive,0.128,RTX
+2025-04-22,RTX Corporation (RTX): One of the Top Defense Stock Picks from the Goldman Sachs Portfolio - Yahoo Finance,positive,0.3182,RTX
+2025-04-23,"Top Analyst Reports for Coca-Cola, Abbott & RTX - Yahoo Finance",positive,0.2023,RTX
+2025-04-01,Why RTX (RTX) is a Top Growth Stock for the Long-Term - Yahoo Finance,positive,0.5267,RTX
+2025-04-27,Oxford Asset Management LLP Raises Stock Position in RTX Co. (NYSE:RTX) - MarketBeat,positive,0.3612,RTX
+2025-04-26,RTX (NYSE:RTX) Stock Rating Upgraded by StockNews.com - MarketBeat,neutral,0.0,RTX
+2025-04-26,RTX (NYSE:RTX) Shares Gap Down - What's Next? - MarketBeat,positive,0.296,RTX
+2025-04-27,RTX Co. (NYSE:RTX) Shares Sold by Lord Abbett & CO. LLC - MarketBeat,positive,0.296,RTX
+2025-04-22,RTX preview: Analysts bullish ahead of Q1 earnings despite tariff headwinds - MSN,neutral,0.0,RTX
+2025-04-23,Defense Stocks Tumble After RTX Warns of Tariff Hit - WSJ,neutral,0.0258,RTX
+2025-04-23,Why RTX Corporation (RTX) Crashed on Tuesday - Yahoo Finance,neutral,0.0,RTX
+2025-04-27,"Integrated Wealth Concepts LLC Acquires 2,334 Shares of RTX Co. (NYSE:RTX) - MarketBeat",positive,0.6597,RTX
+2025-04-22,Defense stocks sink as RTX warns of $850 million hit from tariffs - qz.com,neutral,0.0258,RTX
+2025-04-23,UBS raises RTX Corp. stock price target to $138 from $133 - Investing.com,neutral,0.0,RTX
+2025-04-23,Here's Why RTX (RTX) is a Strong Value Stock - Nasdaq,positive,0.6908,RTX
+2025-04-18,Here's Why RTX (RTX) is a Strong Growth Stock - Yahoo Finance,positive,0.7096,RTX
+2025-04-24,RTX (RTX): BofA Adjusts Price Target Amid Tariff Concerns | RTX Stock News - GuruFocus,neutral,0.0,RTX
+2025-04-26,RTX Co. (NYSE:RTX) Shares Acquired by Trajan Wealth LLC - MarketBeat,positive,0.6597,RTX
+2025-04-27,Royal Bank of Canada Lowers RTX (NYSE:RTX) Price Target to $140.00 - MarketBeat,negative,-0.128,RTX
+2025-04-27,OneDigital Investment Advisors LLC Trims Position in RTX Co. (NYSE:RTX) - MarketBeat,neutral,0.0,RTX
+2025-04-25,RTX Co. (NYSE:RTX) Stock Holdings Lifted by Stifel Financial Corp - MarketBeat,neutral,0.0,RTX
+2025-04-03,Howmet vs. RTX: Which Aerospace & Defense Stock Should You Bet On? - Yahoo Finance,positive,0.128,RTX
+2025-04-25,Renaissance Technologies LLC Has $4.14 Million Stock Position in RTX Co. (NYSE:RTX) - MarketBeat,neutral,0.0,RTX
+2025-04-24,The Nvidia GeForce RTX 5070 Ti Graphics Card Is in Stock on Amazon (for Prime Members) - IGN Southeast Asia,positive,0.1779,RTX
+2025-04-22,RTX Posts Better-Than-Expected Earnings. Why the Stock Is Tumbling. - Barron's,neutral,0.0,RTX
+2025-04-23,Morgan Stanley lifts RTX stock rating following pullback - Investing.com,neutral,0.0,RTX
+2025-04-23,The Nvidia GeForce RTX 5070 Ti Graphics Card Is in Stock on Amazon (for Prime Members) - IGN,positive,0.1779,RTX
+2025-04-23,Where to buy RTX 5060 Ti GPU — live updates and stock checker - Tom's Guide,neutral,0.0,RTX
+2025-04-27,"T. Rowe Price Investment Management Inc. Acquires 3,164,844 Shares of RTX Co. (NYSE:RTX) - MarketBeat",positive,0.296,RTX
+2025-04-07,Why RTX (RTX) is a Top Value Stock for the Long-Term - Nasdaq,positive,0.4939,RTX
+2025-04-23,RTX Corporation (RTX) Stock: Strong Q125 Growth Overshadowed by Tariff Fears - CoinCentral,positive,0.4767,RTX
+2025-04-22,RTX Braces for $850 Million Tariff Hit; Stock Slides - WSJ,neutral,0.0,RTX
+2025-04-25,RTX Co. (NYSE:RTX) Shares Acquired by First Trust Advisors LP - MarketBeat,positive,0.6705,RTX
+2025-04-23,RTX Faces Tariff Concerns Despite Strong Earnings Report | RTX Stock News - GuruFocus,negative,-0.4023,RTX
+2025-04-10,RTX (RTX) Stock Moves -1.06%: What You Should Know - Yahoo,neutral,0.0,RTX
+2025-03-28,3 Reasons RTX is Risky and 1 Stock to Buy Instead - Yahoo Finance,negative,-0.2023,RTX
+2025-04-18,Here's Why RTX (RTX) is a Strong Growth Stock - Nasdaq,positive,0.7096,RTX
+2025-04-25,"State of Tennessee Department of Treasury Sells 2,451 Shares of RTX Co. (NYSE:RTX) - MarketBeat",positive,0.4588,RTX
+2025-04-08,RTX Corporation Earnings Preview: What To Expect - Barchart.com,neutral,0.0,RTX
+2025-04-23,RTX Corporation Q1: This Business Can Tackle Tariffs Head-On And Thrive (NYSE:RTX) - Seeking Alpha,neutral,0.0,RTX
+2025-04-30,RTX Corporation Q1: This Business Can Tackle Tariffs Head-On And Thrive,neutral,0.0,RTX
+2025-04-30,RTX Stock Still A Buy After Tariff Sell-Off,neutral,0.0,RTX
+2025-04-30,RTX upgraded at Morgan Stanley as compelling buying opportunity,positive,0.5719,RTX
+2025-04-30,"SA analyst downgrades: TSLA, NFLX, VZ, CSCO, AVGO, TSM, CRWD, RTX",neutral,0.0,RTX
+2025-04-30,Think Twice Before Buying Into RTX Corp.'s Q1 Earnings Dip (Rating Downgrade),neutral,0.0,RTX
+2025-04-30,"RTX's shares plunge on disappointing sales guidance, tariff worries",negative,-0.5859,RTX
+2025-04-30,RTX outlines 2025 growth targets with 8% organic sales growth in Q1,positive,0.6369,RTX
+2025-04-30,RTX Corporation (RTX) Q1 2025 Earnings Call Transcript,neutral,0.0,RTX
+2025-04-30,RTX Corporation 2025 Q1 - Results - Earnings Call Presentation,neutral,0.0,RTX

@@ -1,0 +1,11 @@
+Ticker,Avg_Sentiment,Count_Positive,Count_Negative,Count_Neutral,Total_Headlines
+RTX,0.1,32,11,40,83
+GOOGL,0.17,26,5,26,57
+TSLA,0.0,12,8,36,56
+LLY,0.11,13,6,21,40
+MSFT,0.14,15,5,19,39
+AAPL,0.06,7,3,17,27
+PLTR,0.05,6,2,15,23
+SRAD,0.13,10,1,12,23
+NVDA,0.13,9,2,11,22
+PFE,0.11,7,1,14,22
