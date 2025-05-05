@@ -6,30 +6,52 @@ from forecast_utils import plot_forecast
 from charts import create_collage
 from email_report import send_report
 from news_scraper import scrape_and_score_news, get_news_headlines
+import logging
+
+
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+logging.getLogger("feedparser").setLevel(logging.WARNING)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)-12s %(message)s"
+)
+
 
 def generate_report():
-    # Your tickers
-    portfolio = ['AAPL', 'MSFT', 'NVDA', 'PFE', 'SRAD', 'MRVL', 'ADI', 'LLY', 'RTX', 'UUUU']
-    watchlist = ['GOOGL', 'TSLA', 'PLTR']
+    # ─── Read portfolio and watchlist from CSV ────────────────────────────
+    # Expect files data/portfolio.csv and data/watchlist.csv, with a "Ticker" column
+    pf_df = pd.read_csv('data/portfolio.csv')
+    if 'Ticker' in pf_df.columns:
+        portfolio = pf_df['Ticker'].dropna().astype(str).tolist()
+    else:
+        portfolio = pf_df.iloc[:, 0].dropna().astype(str).tolist()
 
+    wl_df = pd.read_csv('data/watchlist.csv')
+    if 'Ticker' in wl_df.columns:
+        watchlist = wl_df['Ticker'].dropna().astype(str).tolist()
+    else:
+        watchlist = wl_df.iloc[:, 0].dropna().astype(str).tolist()
+
+    # ─── Bulk‐load all price history (including market index) ────────────────
     from prediction import load_bulk_price_data
     all_tickers = list(set(portfolio + watchlist + ["^GSPC"]))
     load_bulk_price_data(all_tickers, period="90d")
 
-    # Scrape & save sentiment history
+    # ─── Scrape & save sentiment history ────────────────────────────────────
     all_tickers = list(set(portfolio + watchlist))
     news_df = scrape_and_score_news(all_tickers)
     news_df["Date"] = pd.to_datetime(news_df["Date"])
     news_df.to_csv("sentiment_history.csv", index=False)
 
-    # Cutoffs for 30-day / 7-day summaries
+    # ─── Cutoffs for 30-day / 7-day summaries ───────────────────────────────
     cutoff30 = pd.Timestamp.now().normalize() - pd.Timedelta(days=30)
     cutoff7  = pd.Timestamp.now().normalize() - pd.Timedelta(days=7)
     df30 = news_df[news_df["Date"] >= cutoff30]
     df7  = news_df[news_df["Date"] >= cutoff7]
 
-    # Helper to build sentiment tables
-    def summarize_sentiment(df):
+    # ─── Helper to build sentiment tables ────────────────────────────────────
+    def summarize_sentiment(df: pd.DataFrame) -> pd.DataFrame:
         summary = []
         for tic in df["Ticker"].unique():
             sub = df[df["Ticker"] == tic]
@@ -51,13 +73,15 @@ def generate_report():
         )
 
     summary30 = summarize_sentiment(df30)
-    summary7  = summarize_sentiment(df7) \
-                   .sort_values("Total_Headlines", ascending=False) \
-                   .head(10)
+    summary7  = (
+        summarize_sentiment(df7)
+        .sort_values("Total_Headlines", ascending=False)
+        .head(10)
+    )
     summary7.to_csv("daily_mentions.csv", index=False)
     top10 = summary7["Ticker"].tolist()
 
-    # ─── Top-10 Headlines for 7-Day Mention Leaders ───────────────
+    # ─── Top-10 Headlines for 7-Day Mention Leaders ────────────────────────
     top_headlines = {}
     for tic in top10:
         rows = get_news_headlines(tic)
@@ -70,17 +94,17 @@ def generate_report():
             items.append([title, link])
         top_headlines[tic] = items
 
-    # ─── Portfolio Loop ────────────────────────────────────────────────
+    # ─── Portfolio Loop ─────────────────────────────────────────────────────
     portfolio_results = []
     portfolio_images  = []
 
     for ticker in portfolio:
-        sentiment_series = df30[df30["Ticker"] == ticker] \
-                              .set_index("Date")["Score"]
+        sentiment_series = df30[df30["Ticker"] == ticker].set_index("Date")["Score"]
         result = train_predict_stock(ticker, sentiment_series)
         result["ticker"] = ticker
         portfolio_results.append(result)
 
+        # Log each forecast
         pred_date = pd.Timestamp.now().normalize()
         for date, pred in zip(result["dates"], result["predictions"]):
             log_forecast_entry(
@@ -90,6 +114,7 @@ def generate_report():
                 predicted_price = pred
             )
 
+        # Plot and collect image paths
         if result.get("dates") and result.get("history") and result.get("predictions"):
             history_df   = result["history"]
             current_date = pd.to_datetime(history_df["Date"]).max()
@@ -101,13 +126,12 @@ def generate_report():
             )
             portfolio_images.append(img_path)
 
-    # ─── Watchlist Loop ────────────────────────────────────────────────
+    # ─── Watchlist Loop ────────────────────────────────────────────────────
     watchlist_results = []
     watchlist_images  = []
 
     for ticker in watchlist:
-        sentiment_series = df30[df30["Ticker"] == ticker] \
-                              .set_index("Date")["Score"]
+        sentiment_series = df30[df30["Ticker"] == ticker].set_index("Date")["Score"]
         result = train_predict_stock(ticker, sentiment_series)
         result["ticker"] = ticker
         watchlist_results.append(result)
@@ -132,12 +156,12 @@ def generate_report():
             )
             watchlist_images.append(img_path)
 
-    # ─── Build Collages ────────────────────────────────────────────────
+    # ─── Build Collages ─────────────────────────────────────────────────────
     price_data_p = {r["ticker"]: r["history"] for r in portfolio_results}
     forecast_data_p = {
         r["ticker"]: pd.DataFrame({
             "Date": r["dates"],
-            "Forecast_Close": r["predictions"]
+            "Forecast_Close": r["predictions"],
         })
         for r in portfolio_results
     }
@@ -158,7 +182,7 @@ def generate_report():
     forecast_data_w = {
         r["ticker"]: pd.DataFrame({
             "Date": r["dates"],
-            "Forecast_Close": r["predictions"]
+            "Forecast_Close": r["predictions"],
         })
         for r in watchlist_results
     }
@@ -175,6 +199,7 @@ def generate_report():
         "watchlist_collage.png"
     )
 
+    # ─── Send the email report ───────────────────────────────────────────────
     attachments = [collage_portfolio, collage_watchlist]
     send_report(
         portfolio_results,
