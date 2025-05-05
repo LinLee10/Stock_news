@@ -44,33 +44,21 @@ def plot_stock(ax,
                sentiment_list):
     """
     Plot on ax:
-      • last 10 days (solid blue)
       • next 3 days forecast (dashed orange)
       • extend x-axis to include forecast dates
       • add insight text
     """
-    # Historical
-    hist = price_df.tail(10).copy()
-    if not hist.empty:
-        hist["Date"] = pd.to_datetime(hist["Date"])
-        ax.plot(
-            hist["Date"], hist["Close"],
-            label="Historical (10d)",
-            linewidth=1.5, color="blue"
-        )
-
-    # Forecast
+    # Forecast only (Historical data not shown for clarity)
     if isinstance(forecast_df, pd.DataFrame) and not forecast_df.empty:
         fc = forecast_df.copy()
         fc["Date"] = pd.to_datetime(fc["Date"])
         ax.plot(
             fc["Date"], fc["Forecast_Close"],
-            "--o", label="Forecast (3d)",
-            color="orange", linewidth=1.2
+            "--o", color="orange", linewidth=2
         )
-        all_dates = list(hist["Date"]) + list(fc["Date"])
+        all_dates = list(fc["Date"])
     else:
-        all_dates = list(hist["Date"])
+        all_dates = []
 
     if all_dates:
         ax.set_xlim(min(all_dates), max(all_dates) + pd.Timedelta(days=3))
@@ -80,11 +68,6 @@ def plot_stock(ax,
     ax.tick_params(axis="x", rotation=45, labelsize=8)
 
     ax.set_title(ticker, fontsize=10)
-
-    # only draw legend if there’s something to show
-    handles, labels = ax.get_legend_handles_labels()
-    if handles:
-        ax.legend(fontsize=7, loc="upper left")
 
     # insight
     text = make_insight(ticker, price_df, forecast_df, sentiment_list)
