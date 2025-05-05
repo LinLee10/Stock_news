@@ -44,32 +44,80 @@ def plot_stock(ax,
                sentiment_list):
     """
     Plot on ax:
+      • last 10 days (solid blue)
       • next 3 days forecast (dashed orange)
       • extend x-axis to include forecast dates
+      • overlay sentiment (green, twin y-axis)
+      • combined legend
       • add insight text
     """
-    # Forecast only (Historical data not shown for clarity)
+    # Historical price
+    hist = price_df.tail(10).copy()
+    if not hist.empty:
+        hist["Date"] = pd.to_datetime(hist["Date"])
+        ax.plot(
+            hist["Date"], hist["Close"],
+            label="Historical (10d)",
+            linewidth=1.5, color="blue"
+        )
+
+    # Forecasted price
     if isinstance(forecast_df, pd.DataFrame) and not forecast_df.empty:
         fc = forecast_df.copy()
         fc["Date"] = pd.to_datetime(fc["Date"])
         ax.plot(
             fc["Date"], fc["Forecast_Close"],
-            "--o", color="orange", linewidth=2
+            "--o", label="Forecast (3d)",
+            color="orange", linewidth=1.2
         )
-        all_dates = list(fc["Date"])
+        all_dates = list(hist["Date"]) + list(fc["Date"])
     else:
-        all_dates = []
+        all_dates = list(hist["Date"])
 
+    # Extend x-axis by 3 days
     if all_dates:
         ax.set_xlim(min(all_dates), max(all_dates) + pd.Timedelta(days=3))
 
-    # format x-axis
+    # Sentiment on secondary axis
+    # build a pd.Series if they gave us just a list
+    if isinstance(sentiment_list, pd.Series):
+        s = sentiment_list.dropna()
+    else:
+        # align 1:1 with hist dates if lengths match
+        try:
+            s = pd.Series(sentiment_list, index=hist["Date"])
+        except Exception:
+            s = pd.Series(sentiment_list)
+    if not s.empty and hasattr(s.index, 'dtype') and np.issubdtype(s.index.dtype, np.datetime64):
+        ax2 = ax.twinx()
+        ax2.plot(
+            s.index, s.values,
+            "-", label="Sentiment",
+            color="green", linewidth=1.0, alpha=0.7
+        )
+        ax2.set_ylabel("Sentiment", fontsize=8)
+    else:
+        ax2 = None
+
+    # Date formatting & locator
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
     ax.tick_params(axis="x", rotation=45, labelsize=8)
 
     ax.set_title(ticker, fontsize=10)
+    ax.set_ylabel("Price", fontsize=8)
 
-    # insight
+    # Combined legend
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles, labels = handles1, labels1
+    if ax2 is not None:
+        h2, l2 = ax2.get_legend_handles_labels()
+        handles += h2
+        labels  += l2
+    if handles:
+        ax.legend(handles, labels, fontsize=7, loc="upper left")
+
+    # Insight text under plot
     text = make_insight(ticker, price_df, forecast_df, sentiment_list)
     if text:
         ax.text(

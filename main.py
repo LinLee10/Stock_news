@@ -142,7 +142,7 @@ def generate_report():
         for r in portfolio_results
     }
     sentiment_map_p = {
-        tic: df30[df30["Ticker"] == tic].set_index("Date")["Score"].tolist()
+        tic: df30[df30["Ticker"] == tic].set_index("Date")["Score"]
         for tic in portfolio
     }
     collage_portfolio = create_collage(
@@ -163,7 +163,7 @@ def generate_report():
         for r in watchlist_results
     }
     sentiment_map_w = {
-        tic: df30[df30["Ticker"] == tic].set_index("Date")["Score"].tolist()
+        tic: df30[df30["Ticker"] == tic].set_index("Date")["Score"]
         for tic in watchlist
     }
     collage_watchlist = create_collage(
