@@ -27,12 +27,10 @@ if not API_KEY:
     logger.error("Missing ALPHA_VANTAGE_KEY")
     raise RuntimeError("Set ALPHA_VANTAGE_KEY in config/secrets.env")
 
-# ─── In-memory cache ───────────────────────────────────────────────────────────
+# ─── In-memory cache ────────────────────────────────────
 _bulk_price_cache: Dict[str, pd.DataFrame] = {}
 
-def fetch_price_history_bulk(
-    tickers: List[str], period: str = "90d"
-) -> Dict[str, pd.DataFrame]:
+def fetch_price_history_bulk(tickers: List[str], period: str = "90d") -> Dict[str, pd.DataFrame]:
     global _bulk_price_cache
     cache_dir = "data/av_bulk_cache"
     os.makedirs(cache_dir, exist_ok=True)
@@ -100,9 +98,9 @@ def fetch_price_history(ticker: str, period: str = "90d") -> pd.DataFrame:
         fetch_price_history_bulk([ticker], period)
     df = _bulk_price_cache.get(ticker, pd.DataFrame(columns=["Date","Stock_Close"]))
     try:
-        days  = int(period.rstrip("d"))
-        cut   = pd.Timestamp.today() - pd.Timedelta(days=days)
-        df    = df[df["Date"] >= cut].reset_index(drop=True)
+        days = int(period.rstrip("d"))
+        cut  = pd.Timestamp.today() - pd.Timedelta(days=days)
+        df   = df[df["Date"] >= cut].reset_index(drop=True)
     except:
         pass
     return df.rename(columns={"Stock_Close":"Close"})[["Date","Close"]]
@@ -117,17 +115,22 @@ def train_and_forecast(
     try:
         df = (
             price_df
-            .merge(market_df.rename(columns={"Close":"Market_Close"}), on="Date")
-            .merge(peer_df.rename(columns={"Close":"Peer_Close"}), on="Date")
+            .merge(market_df.rename(columns={"Close":"Market_Close"}), on="Date", how="outer")
+            .merge(peer_df.rename(columns={"Close":"Peer_Close"}), on="Date", how="outer")
         )
+        df.sort_values("Date", inplace=True)
+        df["Close"].ffill(inplace=True)
+        df["Market_Close"].ffill(inplace=True)
+        df["Peer_Close"].ffill(inplace=True)
+
         df["Return"]     = df["Close"].pct_change()
         df["MR"]         = df["Market_Close"].pct_change()
         df["PR"]         = df["Peer_Close"].pct_change()
         df["Volatility"] = df["Return"].rolling(5, min_periods=1).std().fillna(0)
 
         if sentiment_series is not None and not sentiment_series.empty:
-            sent      = sentiment_series.copy(); sent.index = pd.to_datetime(sent.index)
-            daily     = sent.groupby(sent.index).mean().reindex(df["Date"], method="ffill").fillna(0)
+            sent   = sentiment_series.copy(); sent.index = pd.to_datetime(sent.index)
+            daily  = sent.groupby(sent.index).mean().reindex(df["Date"], method="ffill").fillna(0)
             df["Sentiment"] = daily.ewm(halflife=7).mean().values
         else:
             df["Sentiment"] = 0.0
@@ -152,8 +155,8 @@ def train_and_forecast(
             df.at[i,"Pred_Close"] = df.at[i-1,"Pred_Close"] * (1 + df.at[i,"EnsembleRet"])
 
         last   = df.iloc[-1]
-        base   = last["Pred_Close"]
         date0  = last["Date"]
+        base   = last["Pred_Close"]
         futs   = []
         vols   = []
         for h in range(1,4):
@@ -173,7 +176,7 @@ def train_and_forecast(
         return fc_df, float(conf), bool(red)
 
     except Exception as e:
-        logger.exception(f"train_and_forecast err for {ticker}")
+        logger.exception(f"train_and_forecast error for {ticker}")
         return pd.DataFrame(columns=["Date","Forecast_Close"]), 0.0, False
 
 def prepare_lstm_data(
@@ -188,7 +191,7 @@ def prepare_lstm_data(
     scaler = StandardScaler()
     scaled = scaler.fit_transform(data)
 
-    X,y = [], []
+    X, y = [], []
     for i in range(window_size, len(scaled)):
         X.append(scaled[i-window_size:i, :])
         y.append(scaled[i, -1])
@@ -230,7 +233,8 @@ def forecast_lstm(
         ret = scaler.inverse_transform(dummy)[0,-1]
         last_price *= (1 + ret)
         preds.append(round(last_price,2))
-        row = window[-1].copy(); row[-1] = r_s
+        row = window[-1].copy()
+        row[-1] = r_s
         window = np.vstack([window[1:], row])
     return preds
 
@@ -248,9 +252,11 @@ def train_predict_stock(
 
     merged = (
         price_df
-        .merge(mkt_df.rename(columns={"Close":"Market_Close"}), on="Date")
-        .merge(peer_df.rename(columns={"Close":"Peer_Close"}), on="Date")
+        .merge(mkt_df.rename(columns={"Close":"Market_Close"}), on="Date", how="outer")
+        .merge(peer_df.rename(columns={"Close":"Peer_Close"}), on="Date", how="outer")
     )
+    merged.sort_values("Date", inplace=True)
+    merged[["Close","Market_Close","Peer_Close"]] = merged[["Close","Market_Close","Peer_Close"]].ffill()
     merged["Return"]     = merged["Close"].pct_change().fillna(0)
     merged["MR"]         = merged["Market_Close"].pct_change().fillna(0)
     merged["PR"]         = merged["Peer_Close"].pct_change().fillna(0)
@@ -268,7 +274,7 @@ def train_predict_stock(
             "dates":       [],
             "history":     price_df,
             "predictions": tree_preds,
-            "confidence":  c_tree, 
+            "confidence":  c_tree,
             "red_flag":    r_tree
         }
 
@@ -281,7 +287,7 @@ def train_predict_stock(
             c_lstm     = 1.0
         else:
             lstm_preds, c_lstm = tree_preds.copy(), c_tree
-    except:
+    except Exception:
         lstm_preds, c_lstm = tree_preds.copy(), c_tree
 
     final_preds = [round((t + l)/2,2) for t, l in zip(tree_preds, lstm_preds)]

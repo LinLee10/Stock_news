@@ -4,14 +4,13 @@ import smtplib
 import pandas as pd
 
 from email.message import EmailMessage
-from prettytable import PrettyTable
 from datetime import datetime
 from dotenv import load_dotenv
 
 logger = logging.getLogger("email_report")
 logging.basicConfig(level=logging.INFO)
 
-# ─── Load SMTP creds ─────────────────────────────────────────────────────────
+# ─── Load SMTP credentials ────────────────────────────────
 load_dotenv("config/secrets.env")
 SMTP_HOST = os.getenv("SMTP_HOST")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -19,94 +18,105 @@ SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 EMAIL_TO  = os.getenv("EMAIL_TO")
 
-
-def format_table(df: pd.DataFrame, title: str) -> str:
-    tbl = PrettyTable()
-    tbl.field_names = df.columns.tolist()
-    for _, row in df.iterrows():
-        tbl.add_row(row.tolist())
-    return f"\n{title}\n{tbl}\n"
-
-
 def send_report(
     watchlist: list[str],
     portfolio:  list[str],
     head_data:  dict,
     preds:      dict,
     collage_path: str = None,
-    out_path:     str = "report.txt"
+    out_path:     str = "report.html"
 ):
     now  = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    body = f"Stock News Forecast Report — {now}\n"
+    # Build HTML body
+    html = f"<html><body><h2>Stock News Forecast Report — {now}</h2>"
 
-    # Watchlist
-    wl_rows = []
+    # Watchlist Forecasts
+    html += "<h3>Watchlist Forecasts</h3>"
+    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Confidence</th><th>RedFlag</th><th>3-Day Forecast</th></tr>"
     for t in watchlist:
         p = preds[t]
-        wl_rows.append({
-            "Ticker":      t,
-            "Confidence":  f"{p['confidence']:.2f}",
-            "RedFlag":     p["red_flag"],
-            "Predictions": ", ".join(str(x) for x in p["predictions"])
-        })
-    df_wl = pd.DataFrame(wl_rows)
-    body += format_table(df_wl, "Watchlist Forecasts")
+        preds_str = ", ".join(str(x) for x in p['predictions'])
+        html += f"<tr><td style='padding:4px;'>{t}</td><td>{p['confidence']:.2f}</td><td>{p['red_flag']}</td><td>{preds_str}</td></tr>"
+    html += "</table>"
 
-    # Portfolio
-    pf_rows = []
+    # Portfolio Forecasts
+    html += "<h3>Portfolio Forecasts</h3>"
+    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Confidence</th><th>RedFlag</th><th>3-Day Forecast</th></tr>"
     for t in portfolio:
         p = preds[t]
-        pf_rows.append({
-            "Ticker":      t,
-            "Confidence":  f"{p['confidence']:.2f}",
-            "RedFlag":     p["red_flag"],
-            "Predictions": ", ".join(str(x) for x in p["predictions"])
-        })
-    df_pf = pd.DataFrame(pf_rows)
-    body += format_table(df_pf, "Portfolio Forecasts")
+        preds_str = ", ".join(str(x) for x in p['predictions'])
+        html += f"<tr><td style='padding:4px;'>{t}</td><td>{p['confidence']:.2f}</td><td>{p['red_flag']}</td><td>{preds_str}</td></tr>"
+    html += "</table>"
 
-    # Top 10 mentions
+    # 7-Day Mention Leaders & Headlines
+    html += "<h3>7-Day Mention Leaders & Headlines</h3>"
+    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Avg_Sentiment</th><th>Count_Positive</th><th>Count_Negative</th><th>Count_Neutral</th><th>Total_Headlines</th></tr>"
     recs = []
     for t, info in head_data.items():
-        d_sent   = info["daily_sentiment"]
-        avg_sent = sum(d_sent.values()) / len(d_sent) if d_sent else 0.0
-        heads    = "; ".join([h for h, _, _ in info["headlines"]])
-        recs.append({
-            "Ticker":   t,
-            "Mentions": info["count"],
-            "AvgSent":  f"{avg_sent:.2f}",
-            "Headlines": heads
-        })
-    top10   = sorted(recs, key=lambda r: r["Mentions"], reverse=True)[:10]
-    df_top = pd.DataFrame(top10)
-    body += format_table(df_top, "Top 10 Most Mentioned (Last 10 days)")
+        headlines = info['headlines']
+        total     = info['count']
+        pos = info.get('count_positive', 0)
+        neg = info.get('count_negative', 0)
+        neu = info.get('count_neutral', 0)
+        avg_sent = sum(info['daily_sentiment'].values()) / len(info['daily_sentiment']) if info['daily_sentiment'] else 0.0
+        recs.append((t, avg_sent, pos, neg, neu, total, headlines))
+    recs.sort(key=lambda x: x[5], reverse=True)  # sort by total headlines
+    top10 = recs[:10]
+    for t, avg_sent, pos, neg, neu, total, headlines in top10:
+        html += (f"<tr><td style='padding:4px;'>{t}</td>"
+                 f"<td>{avg_sent:.2f}</td><td>{pos}</td><td>{neg}</td><td>{neu}</td><td>{total}</td></tr>")
+    html += "</table>"
 
-    # write local file
+    # Headlines for each top ticker
+    for t, avg_sent, pos, neg, neu, total, headlines in top10:
+        html += f"<p><strong>{t} Headlines:</strong></p><ul>"
+        for title, link, date in headlines:
+            safe_title = title.replace('<','&lt;').replace('>','&gt;')
+            html += f"<li><a href='{link}'>{safe_title}</a> ({date})</li>"
+        html += "</ul>"
+
+    # 30-Day Sentiment (Portfolio vs Watchlist combined) – using same head_data as placeholder
+    html += "<h3>30-Day Sentiment</h3>"
+    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Avg_Sentiment</th><th>Count_Positive</th><th>Count_Negative</th><th>Count_Neutral</th><th>Total_Headlines</th></tr>"
+    for t, info in head_data.items():
+        total = info['count']
+        pos = info.get('count_positive', 0)
+        neg = info.get('count_negative', 0)
+        neu = info.get('count_neutral', 0)
+        avg_sent = sum(info['daily_sentiment'].values()) / len(info['daily_sentiment']) if info['daily_sentiment'] else 0.0
+        html += (f"<tr><td style='padding:4px;'>{t}</td>"
+                 f"<td>{avg_sent:.2f}</td><td>{pos}</td><td>{neg}</td><td>{neu}</td><td>{total}</td></tr>")
+    html += "</table>"
+
+    # Embed collage image if provided
+    if collage_path and os.path.exists(collage_path):
+        html += "<h3>Portfolio & Watchlist Collage</h3>"
+        cid = 'collage_img'
+        html += f"<img src='cid:{cid}' alt='Collage'/>"
+
+    html += "</body></html>"
+
+    # Write HTML report to file
     with open(out_path, "w") as f:
-        f.write(body)
+        f.write(html)
     logger.info(f"Report written to {out_path}")
 
-    # send email if creds present
+    # Send email with HTML content
     if SMTP_HOST and SMTP_USER and SMTP_PASS and EMAIL_TO:
         msg = EmailMessage()
         msg["Subject"] = f"Stock News Forecast — {now}"
         msg["From"]    = SMTP_USER
         msg["To"]      = EMAIL_TO
-        msg.set_content(body)
-
+        msg.add_alternative(html, subtype='html')
         if collage_path and os.path.exists(collage_path):
             with open(collage_path, "rb") as img:
-                data = img.read()
-            msg.add_attachment(data,
-                maintype="image", subtype="png",
-                filename=os.path.basename(collage_path)
-            )
-
+                img_data = img.read()
+            msg.get_payload()[0].add_related(img_data, 'image', 'png', cid=cid)
         try:
             with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
                 smtp.starttls()
                 smtp.login(SMTP_USER, SMTP_PASS)
                 smtp.send_message(msg)
-            logger.info(f"Email sent to {EMAIL_TO}")
+                logger.info(f"Email sent to {EMAIL_TO}")
         except Exception as e:
             logger.error(f"Failed to send email: {e}")

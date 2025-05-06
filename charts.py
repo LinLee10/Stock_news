@@ -16,7 +16,6 @@ def make_insight(ticker: str,
     pct   = (end - start) / start
     trend = "up" if pct >= 0 else "down"
 
-    # aggregate sentiment list
     scores = []
     for v in sentiment_list:
         try:
@@ -28,14 +27,14 @@ def make_insight(ticker: str,
 
     s1 = f"{ticker} has gone {trend} {abs(pct)*100:.1f}% over the past 10 days."
     s2 = f"Average news sentiment was {tone} ({avg_s:+.2f})."
-    return f"{s1} {s2}"
+    return f"{s1}\n{s2}"
 
 def plot_stock(ax,
                ticker: str,
                price_df: pd.DataFrame,
                forecast_df: pd.DataFrame,
                sentiment_list):
-    # historical
+    # historical (last 10 days)
     hist = price_df.tail(10).copy()
     if not hist.empty:
         hist["Date"] = pd.to_datetime(hist["Date"])
@@ -44,7 +43,7 @@ def plot_stock(ax,
             label="Historical (10d)", linewidth=1.5, color="blue"
         )
 
-    # forecast
+    # forecast (next 3 days)
     if isinstance(forecast_df, pd.DataFrame) and not forecast_df.empty:
         fc = forecast_df.copy()
         fc["Date"] = pd.to_datetime(fc["Date"])
@@ -56,11 +55,11 @@ def plot_stock(ax,
     else:
         all_dates = list(hist["Date"])
 
-    # extend x-axis
+    # extend x-axis a bit beyond data
     if all_dates:
         ax.set_xlim(min(all_dates), max(all_dates) + pd.Timedelta(days=3))
 
-    # sentiment overlay
+    # sentiment overlay on secondary axis
     if isinstance(sentiment_list, pd.Series):
         s = sentiment_list.dropna()
     else:
@@ -78,7 +77,6 @@ def plot_stock(ax,
     else:
         ax2 = None
 
-    # formatting
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
     ax.tick_params(axis="x", rotation=45, labelsize=8)
@@ -91,15 +89,6 @@ def plot_stock(ax,
         handles += h2; labels += l2
     if handles:
         ax.legend(handles, labels, fontsize=7, loc="upper left")
-
-    text = make_insight(ticker, price_df, forecast_df, sentiment_list)
-    if text:
-        ax.text(
-            0.5, -0.2, text,
-            transform=ax.transAxes,
-            ha="center", va="top",
-            wrap=True, fontsize=7
-        )
 
 def create_collage(
     tickers: list[str],
@@ -119,6 +108,7 @@ def create_collage(
         s_list  = sentiment_map.get(tic, [])
         plot_stock(ax, tic, hist_df, f_df, s_list)
 
+    # remove unused subplots
     for ax in axes_flat[len(tickers):]:
         fig.delaxes(ax)
 

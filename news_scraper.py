@@ -17,7 +17,16 @@ TICKER_COMPANY = {
     "AAPL": "Apple Inc.",
     "GOOGL": "Alphabet Inc.",
     "NVDA": "NVIDIA Corporation",
-    # … add the rest of your tickers here …
+    "RTX": "Raytheon Technologies Corporation",
+    "UUUU": "Energy Fuels Inc.",
+    "PFE": "Pfizer Inc.",
+    "SRAD": "Sportradar Group AG",
+    "MRVL": "Marvell Technology, Inc.",
+    "ADI": "Analog Devices, Inc.",
+    "LLY": "Eli Lilly and Company",
+    "MSFT": "Microsoft Corporation",
+    "PLTR": "Palantir Technologies Inc.",
+    # … add more tickers and company names as needed
 }
 
 # ─── FinBERT sentiment pipeline ───────────────────────────────────────────────
@@ -65,14 +74,17 @@ def scrape_headlines(tickers: list[str]) -> dict[str, dict]:
     """
     Returns for each ticker:
       {
-        'headlines': [(title, link, date), ...],
-        'count': int,
-        'daily_sentiment': {date: mean_score, ...}
+        'headlines':       [(title, link, date), ...],
+        'count':           total_matches,
+        'daily_sentiment': {date: avg_score, ...},
+        'count_positive':  number_of_positive,
+        'count_negative':  number_of_negative,
+        'count_neutral':   number_of_neutral
       }
-    over the past 10 calendar days.
+    over the past 7 calendar days.
     """
     today = datetime.utcnow().date()
-    window_start = today - timedelta(days=9)
+    window_start = today - timedelta(days=6)   # 7-day window
     results = {}
     sent_pipe = get_sentiment_pipeline()
 
@@ -88,26 +100,39 @@ def scrape_headlines(tickers: list[str]) -> dict[str, dict]:
                 matches.append((title, link, d))
 
         # Compute sentiment for each matched headline
-        texts = [t for t, _, _ in matches]
-        scores = []
-        if texts:
-            batch = sent_pipe(texts, batch_size=16)
-            for out in batch:
-                score = out["score"]
-                if out["label"] != "POSITIVE":
-                    score = -score
-                scores.append(score)
-
-        # Aggregate per-day mean
         daily = defaultdict(list)
-        for ((_, _, d), s) in zip(matches, scores):
-            daily[d].append(s)
-        daily_mean = {d: sum(v)/len(v) for d, v in daily.items()}
+        count_pos = count_neg = count_neu = 0
+        if matches:
+            texts = [t for t, _, _ in matches]
+            batch = sent_pipe(texts, batch_size=16)
+            labels = []
+            scores = []
+            for out in batch:
+                label = out["label"]
+                labels.append(label)
+                score_val = out["score"]
+                if label == "POSITIVE":
+                    score = score_val
+                elif label == "NEGATIVE":
+                    score = -score_val
+                else:
+                    score = 0.0
+                scores.append(score)
+            count_pos = labels.count("POSITIVE")
+            count_neg = labels.count("NEGATIVE")
+            count_neu = labels.count("NEUTRAL")
 
+            for ((_, _, d), s) in zip(matches, scores):
+                daily[d].append(s)
+
+        daily_mean = {d: sum(v)/len(v) for d, v in daily.items()} if daily else {}
         results[tic] = {
             "headlines":       matches,
             "count":           len(matches),
-            "daily_sentiment": daily_mean
+            "daily_sentiment": daily_mean,
+            "count_positive":  count_pos,
+            "count_negative":  count_neg,
+            "count_neutral":   count_neu,
         }
         logger.info(f"[{tic}] {len(matches)} headlines from {window_start} → {today}")
     return results
