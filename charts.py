@@ -1,5 +1,3 @@
-# charts.py
-
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,11 +8,6 @@ def make_insight(ticker: str,
                  price_df: pd.DataFrame,
                  forecast_df: pd.DataFrame,
                  sentiment_list) -> str:
-    """
-    Two-sentence insight:
-      1) 10-day % change
-      2) 90-day avg sentiment tone
-    """
     if price_df.empty:
         return ""
     hist10 = price_df.tail(10)
@@ -23,13 +16,13 @@ def make_insight(ticker: str,
     pct   = (end - start) / start
     trend = "up" if pct >= 0 else "down"
 
-    # sentiment
+    # aggregate sentiment list
     scores = []
     for v in sentiment_list:
-        if isinstance(v, dict):
-            scores.append(float(v.get("Score", v.get("score", 0.0))))
-        elif isinstance(v, (int, float)):
+        try:
             scores.append(float(v))
+        except:
+            pass
     avg_s = float(np.mean(scores)) if scores else 0.0
     tone  = "positive" if avg_s >= 0 else "negative"
 
@@ -42,82 +35,63 @@ def plot_stock(ax,
                price_df: pd.DataFrame,
                forecast_df: pd.DataFrame,
                sentiment_list):
-    """
-    Plot on ax:
-      • last 10 days (solid blue)
-      • next 3 days forecast (dashed orange)
-      • extend x-axis to include forecast dates
-      • overlay sentiment (green, twin y-axis)
-      • combined legend
-      • add insight text
-    """
-    # Historical price
+    # historical
     hist = price_df.tail(10).copy()
     if not hist.empty:
         hist["Date"] = pd.to_datetime(hist["Date"])
         ax.plot(
             hist["Date"], hist["Close"],
-            label="Historical (10d)",
-            linewidth=1.5, color="blue"
+            label="Historical (10d)", linewidth=1.5, color="blue"
         )
 
-    # Forecasted price
+    # forecast
     if isinstance(forecast_df, pd.DataFrame) and not forecast_df.empty:
         fc = forecast_df.copy()
         fc["Date"] = pd.to_datetime(fc["Date"])
         ax.plot(
             fc["Date"], fc["Forecast_Close"],
-            "--o", label="Forecast (3d)",
-            color="orange", linewidth=1.2
+            "--o", label="Forecast (3d)", color="orange", linewidth=1.2
         )
         all_dates = list(hist["Date"]) + list(fc["Date"])
     else:
         all_dates = list(hist["Date"])
 
-    # Extend x-axis by 3 days
+    # extend x-axis
     if all_dates:
         ax.set_xlim(min(all_dates), max(all_dates) + pd.Timedelta(days=3))
 
-    # Sentiment on secondary axis
-    # build a pd.Series if they gave us just a list
+    # sentiment overlay
     if isinstance(sentiment_list, pd.Series):
         s = sentiment_list.dropna()
     else:
-        # align 1:1 with hist dates if lengths match
         try:
             s = pd.Series(sentiment_list, index=hist["Date"])
-        except Exception:
+        except:
             s = pd.Series(sentiment_list)
     if not s.empty and hasattr(s.index, 'dtype') and np.issubdtype(s.index.dtype, np.datetime64):
         ax2 = ax.twinx()
         ax2.plot(
             s.index, s.values,
-            "-", label="Sentiment",
-            color="green", linewidth=1.0, alpha=0.7
+            "-", label="Sentiment", color="green", linewidth=1.0, alpha=0.7
         )
         ax2.set_ylabel("Sentiment", fontsize=8)
     else:
         ax2 = None
 
-    # Date formatting & locator
+    # formatting
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
     ax.tick_params(axis="x", rotation=45, labelsize=8)
-
     ax.set_title(ticker, fontsize=10)
     ax.set_ylabel("Price", fontsize=8)
 
-    # Combined legend
-    handles1, labels1 = ax.get_legend_handles_labels()
-    handles, labels = handles1, labels1
+    handles, labels = ax.get_legend_handles_labels()
     if ax2 is not None:
         h2, l2 = ax2.get_legend_handles_labels()
-        handles += h2
-        labels  += l2
+        handles += h2; labels += l2
     if handles:
         ax.legend(handles, labels, fontsize=7, loc="upper left")
 
-    # Insight text under plot
     text = make_insight(ticker, price_df, forecast_df, sentiment_list)
     if text:
         ax.text(
@@ -135,21 +109,16 @@ def create_collage(
     title: str,
     save_path: str
 ) -> str:
-    """
-    Build and save a 2-column collage of subplots for each ticker.
-    Returns the file path (save_path).
-    """
     rows = math.ceil(len(tickers) / 2)
     fig, axes = plt.subplots(rows, 2, figsize=(10, rows * 4), squeeze=False)
     axes_flat = axes.flatten()
 
     for ax, tic in zip(axes_flat, tickers):
-        hist_df = price_data.get(tic, pd.DataFrame())
+        hist_df = price_data.get(tic, pd.DataFrame(columns=["Date","Close"]))
         f_df    = forecast_data.get(tic, pd.DataFrame())
         s_list  = sentiment_map.get(tic, [])
         plot_stock(ax, tic, hist_df, f_df, s_list)
 
-    # remove any unused axes
     for ax in axes_flat[len(tickers):]:
         fig.delaxes(ax)
 

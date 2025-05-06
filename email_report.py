@@ -1,144 +1,112 @@
-# email_report.py
-
 import os
+import logging
 import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text      import MIMEText
-from email.mime.image     import MIMEImage
-from dotenv               import load_dotenv
+import pandas as pd
 
+from email.message import EmailMessage
+from prettytable import PrettyTable
+from datetime import datetime
+from dotenv import load_dotenv
+
+logger = logging.getLogger("email_report")
+logging.basicConfig(level=logging.INFO)
+
+# ─── Load SMTP creds ─────────────────────────────────────────────────────────
 load_dotenv("config/secrets.env")
-USER = os.getenv("EMAIL_ADDRESS")
-PWD  = os.getenv("EMAIL_PASSWORD")
-TO   = os.getenv("TO_EMAIL")
-
-def send_report(portfolio_results, watchlist_results,
-                summary7, summary30, attachments, top_headlines):
-    """
-    portfolio_results: list of dicts from train_predict_stock()
-    watchlist_results: same but for watchlist
-    summary7: pd.DataFrame of 7-day mentions summary
-    summary30: pd.DataFrame of 30-day sentiment summary
-    top_headlines: dict[ticker] -> list of (headline:str, url:str)
-    """
-
-    # 1) Build subject + container
-    subject = "Daily Stock Forecast Report"
-    msg = MIMEMultipart("related")
-    msg["From"]    = USER
-    msg["To"]      = TO
-    msg["Subject"] = subject
-
-    # 2) Style block (embedded CSS)
-    style = """
-    <style>
-      body { font-family: Arial, sans-serif; color: #333; }
-      h1 { text-align: center; }
-      table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: center; }
-      th { background: #f4f4f4; }
-      .section { margin-top: 30px; }
-      .ticker-headlines { margin-bottom: 15px; }
-      .ticker-headlines h4 { margin: 5px 0; }
-    </style>
-    """
-
-    # 3) 7-day mentions table HTML
-    t7 = summary7.to_html(index=False, classes="table", border=0)
+SMTP_HOST = os.getenv("SMTP_HOST")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
+EMAIL_TO  = os.getenv("EMAIL_TO")
 
 
-    # 4a) Split 30-day sentiment into Portfolio vs Watchlist
-    port_tickers  = [r["ticker"] for r in portfolio_results]
-    watch_tickers = [r["ticker"] for r in watchlist_results]
-
-    summary30_port  = summary30[summary30["Ticker"].isin(port_tickers)]
-    summary30_watch = summary30[summary30["Ticker"].isin(watch_tickers)]
-
-    t30_port  = summary30_port.to_html(index=False, classes="table", border=0)
-    t30_watch = summary30_watch.to_html(index=False, classes="table", border=0)
+def format_table(df: pd.DataFrame, title: str) -> str:
+    tbl = PrettyTable()
+    tbl.field_names = df.columns.tolist()
+    for _, row in df.iterrows():
+        tbl.add_row(row.tolist())
+    return f"\n{title}\n{tbl}\n"
 
 
-    # 5) Portfolio forecasts table
-    rows = ""
-    for r in portfolio_results:
-        rows += f"<tr><td>{r['ticker']}</td><td>{', '.join(f'{d.date()}:${p}' for d,p in zip(r['dates'],r['predictions']))}</td></tr>"
-    t_port = f"""
-      <table>
-        <thead><tr><th>Ticker</th><th>3-Day Forecasts</th></tr></thead>
-        <tbody>{rows}</tbody>
-      </table>
-    """
+def send_report(
+    watchlist: list[str],
+    portfolio:  list[str],
+    head_data:  dict,
+    preds:      dict,
+    collage_path: str = None,
+    out_path:     str = "report.txt"
+):
+    now  = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    body = f"Stock News Forecast Report — {now}\n"
 
-    # 6) Watchlist forecasts table
-    rows = ""
-    for r in watchlist_results:
-        rows += f"<tr><td>{r['ticker']}</td><td>{', '.join(f'{d.date()}:${p}' for d,p in zip(r['dates'],r['predictions']))}</td></tr>"
-    t_watch = f"""
-      <table>
-        <thead><tr><th>Ticker</th><th>3-Day Forecasts</th></tr></thead>
-        <tbody>{rows}</tbody>
-      </table>
-    """
+    # Watchlist
+    wl_rows = []
+    for t in watchlist:
+        p = preds[t]
+        wl_rows.append({
+            "Ticker":      t,
+            "Confidence":  f"{p['confidence']:.2f}",
+            "RedFlag":     p["red_flag"],
+            "Predictions": ", ".join(str(x) for x in p["predictions"])
+        })
+    df_wl = pd.DataFrame(wl_rows)
+    body += format_table(df_wl, "Watchlist Forecasts")
 
-    # 7) Top-10 headlines block
-    hl_block = ""
-    for tic, items in top_headlines.items():
-        hl_block += f"<div class='ticker-headlines'><h4>{tic}</h4><ul>"
-        for head, link in items:
-            hl_block += f"<li><a href='{link}' target='_blank'>{head}</a></li>"
-        hl_block += "</ul></div>"
+    # Portfolio
+    pf_rows = []
+    for t in portfolio:
+        p = preds[t]
+        pf_rows.append({
+            "Ticker":      t,
+            "Confidence":  f"{p['confidence']:.2f}",
+            "RedFlag":     p["red_flag"],
+            "Predictions": ", ".join(str(x) for x in p["predictions"])
+        })
+    df_pf = pd.DataFrame(pf_rows)
+    body += format_table(df_pf, "Portfolio Forecasts")
 
-    # 8) Assemble full HTML body
-    html_body = f"""
-    <html><head>{style}</head><body>
-      <h1>{subject}</h1>
+    # Top 10 mentions
+    recs = []
+    for t, info in head_data.items():
+        d_sent   = info["daily_sentiment"]
+        avg_sent = sum(d_sent.values()) / len(d_sent) if d_sent else 0.0
+        heads    = "; ".join([h for h, _, _ in info["headlines"]])
+        recs.append({
+            "Ticker":   t,
+            "Mentions": info["count"],
+            "AvgSent":  f"{avg_sent:.2f}",
+            "Headlines": heads
+        })
+    top10   = sorted(recs, key=lambda r: r["Mentions"], reverse=True)[:10]
+    df_top = pd.DataFrame(top10)
+    body += format_table(df_top, "Top 10 Most Mentioned (Last 10 days)")
 
-      <div class='section'>
-        <h2>7-Day Mention Leaders & Headlines</h2>
-        {t7}
-        {hl_block}
-      </div>
+    # write local file
+    with open(out_path, "w") as f:
+        f.write(body)
+    logger.info(f"Report written to {out_path}")
 
-      <div class='section'>
-        <h2>30-Day Sentiment (Portfolio)</h2>
-        {t30_port}
-      </div>
+    # send email if creds present
+    if SMTP_HOST and SMTP_USER and SMTP_PASS and EMAIL_TO:
+        msg = EmailMessage()
+        msg["Subject"] = f"Stock News Forecast — {now}"
+        msg["From"]    = SMTP_USER
+        msg["To"]      = EMAIL_TO
+        msg.set_content(body)
 
-      <div class='section'>
-        <h2>30-Day Sentiment (Watchlist) </h2>
-        {t30_watch}
-      </div>
+        if collage_path and os.path.exists(collage_path):
+            with open(collage_path, "rb") as img:
+                data = img.read()
+            msg.add_attachment(data,
+                maintype="image", subtype="png",
+                filename=os.path.basename(collage_path)
+            )
 
-      <div class='section'>
-        <h2>Portfolio Forecasts</h2>
-        {t_port}
-      </div>
-
-      <div class='section'>
-        <h2>Watchlist Forecasts</h2>
-        {t_watch}
-      </div>
-    </body></html>
-    """
-
-    # 9) Attach HTML
-    msg.attach(MIMEText(html_body, "html"))
-
-    # 10) Attach images (plots)
-    for path in attachments or []:
-        if not path or not os.path.isfile(path):
-            continue
-        with open(path, "rb") as f:
-            img = MIMEImage(f.read())
-            img.add_header("Content-Disposition", "attachment",
-                           filename=os.path.basename(path))
-            msg.attach(img)
-
-    # 11) Send
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(USER, PWD)
-            smtp.send_message(msg)
-            print("Email sent successfully.")
-    except Exception as e:
-        print(f"[email_report] send error: {e}")
+        try:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+                smtp.starttls()
+                smtp.login(SMTP_USER, SMTP_PASS)
+                smtp.send_message(msg)
+            logger.info(f"Email sent to {EMAIL_TO}")
+        except Exception as e:
+            logger.error(f"Failed to send email: {e}")
