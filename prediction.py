@@ -103,7 +103,10 @@ def fetch_price_history(ticker: str, period: str = "90d") -> pd.DataFrame:
         df   = df[df["Date"] >= cut].reset_index(drop=True)
     except:
         pass
-    return df.rename(columns={"Stock_Close":"Close"})[["Date","Close"]]
+    out = df.rename(columns={"Stock_Close":"Close"})[["Date","Close"]]
+    out["Date"] = pd.to_datetime(out["Date"])
+    return out
+
 
 def train_and_forecast(
     ticker: str,
@@ -247,7 +250,8 @@ def train_predict_stock(
 ) -> dict:
     logger.debug(f"=== train_predict_stock: {ticker} ===")
     price_df = fetch_price_history(ticker)
-    mkt_df   = fetch_price_history("^GSPC")
+    mkt_df   = fetch_price_history("SPX")
+    logger.debug(f"market_df for {ticker}: {len(mkt_df)} rows")
     peer_df  = fetch_price_history(ticker)
 
     tree_df, c_tree, r_tree = train_and_forecast(ticker, price_df, mkt_df, peer_df, sentiment_series)
