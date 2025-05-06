@@ -19,99 +19,220 @@ SMTP_PASS = os.getenv("SMTP_PASS")
 EMAIL_TO  = os.getenv("EMAIL_TO")
 
 def send_report(
-    watchlist: list[str],
-    portfolio:  list[str],
-    head_data:  dict,
-    preds:      dict,
-    collage_path: str = None,
-    out_path:     str = "report.html"
+    watchlist:         list[str],
+    portfolio:         list[str],
+    head7:             dict,      # 7-day mention data
+    head30:            dict,      # 30-day sentiment data
+    preds:             dict,
+    portfolio_collage: str = None,
+    watchlist_collage: str = None,
+    out_path:          str = "report.html"
 ):
     now  = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    # Build HTML body
     html = f"<html><body><h2>Stock News Forecast Report — {now}</h2>"
 
+    #
+    # 30-Day Sentiment — Portfolio
+    #
+    html += "<h3>30-Day Sentiment — Portfolio</h3>"
+    html += (
+        "<table style='border-collapse: collapse;'>"
+        "<tr>"
+          "<th style='padding:4px;'>Ticker</th>"
+          "<th>Avg_Sentiment</th>"
+          "<th>Count_Positive</th>"
+          "<th>Count_Negative</th>"
+          "<th>Count_Neutral</th>"
+          "<th>Total_Headlines</th>"
+        "</tr>"
+    )
+    for t in portfolio:
+        info       = head30.get(t, {})
+        total      = info.get('count', 0)
+        pos        = info.get('count_positive', 0)
+        neg        = info.get('count_negative', 0)
+        neu        = info.get('count_neutral', 0)
+        dsent_dict = info.get('daily_sentiment', {})
+        avg_sent   = (sum(dsent_dict.values()) / len(dsent_dict)) if dsent_dict else 0.0
+
+        html += (
+          f"<tr>"
+            f"<td style='padding:4px;'>{t}</td>"
+            f"<td>{avg_sent:.2f}</td>"
+            f"<td>{pos}</td>"
+            f"<td>{neg}</td>"
+            f"<td>{neu}</td>"
+            f"<td>{total}</td>"
+          f"</tr>"
+        )
+    html += "</table>"
+
+    #
+    # 30-Day Sentiment — Watchlist
+    #
+    html += "<h3>30-Day Sentiment — Watchlist</h3>"
+    html += (
+        "<table style='border-collapse: collapse;'>"
+        "<tr>"
+          "<th style='padding:4px;'>Ticker</th>"
+          "<th>Avg_Sentiment</th>"
+          "<th>Count_Positive</th>"
+          "<th>Count_Negative</th>"
+          "<th>Count_Neutral</th>"
+          "<th>Total_Headlines</th>"
+        "</tr>"
+    )
+    for t in watchlist:
+        info       = head30.get(t, {})
+        total      = info.get('count', 0)
+        pos        = info.get('count_positive', 0)
+        neg        = info.get('count_negative', 0)
+        neu        = info.get('count_neutral', 0)
+        dsent_dict = info.get('daily_sentiment', {})
+        avg_sent   = (sum(dsent_dict.values()) / len(dsent_dict)) if dsent_dict else 0.0
+
+        html += (
+          f"<tr>"
+            f"<td style='padding:4px;'>{t}</td>"
+            f"<td>{avg_sent:.2f}</td>"
+            f"<td>{pos}</td>"
+            f"<td>{neg}</td>"
+            f"<td>{neu}</td>"
+            f"<td>{total}</td>"
+          f"</tr>"
+        )
+    html += "</table>"
+
+    #
     # Watchlist Forecasts
+    #
     html += "<h3>Watchlist Forecasts</h3>"
-    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Confidence</th><th>RedFlag</th><th>3-Day Forecast</th></tr>"
+    html += (
+      "<table style='border-collapse: collapse;'>"
+      "<tr>"
+        "<th style='padding:4px;'>Ticker</th>"
+        "<th>Confidence</th>"
+        "<th>RedFlag</th>"
+        "<th>3-Day Forecast</th>"
+      "</tr>"
+    )
     for t in watchlist:
         p = preds[t]
         preds_str = ", ".join(str(x) for x in p['predictions'])
-        html += f"<tr><td style='padding:4px;'>{t}</td><td>{p['confidence']:.2f}</td><td>{p['red_flag']}</td><td>{preds_str}</td></tr>"
+        html += (
+          f"<tr>"
+            f"<td style='padding:4px;'>{t}</td>"
+            f"<td>{p['confidence']:.2f}</td>"
+            f"<td>{p['red_flag']}</td>"
+            f"<td>{preds_str}</td>"
+          f"</tr>"
+        )
     html += "</table>"
 
+    #
     # Portfolio Forecasts
+    #
     html += "<h3>Portfolio Forecasts</h3>"
-    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Confidence</th><th>RedFlag</th><th>3-Day Forecast</th></tr>"
+    html += (
+      "<table style='border-collapse: collapse;'>"
+      "<tr>"
+        "<th style='padding:4px;'>Ticker</th>"
+        "<th>Confidence</th>"
+        "<th>RedFlag</th>"
+        "<th>3-Day Forecast</th>"
+      "</tr>"
+    )
     for t in portfolio:
         p = preds[t]
         preds_str = ", ".join(str(x) for x in p['predictions'])
-        html += f"<tr><td style='padding:4px;'>{t}</td><td>{p['confidence']:.2f}</td><td>{p['red_flag']}</td><td>{preds_str}</td></tr>"
+        html += (
+          f"<tr>"
+            f"<td style='padding:4px;'>{t}</td>"
+            f"<td>{p['confidence']:.2f}</td>"
+            f"<td>{p['red_flag']}</td>"
+            f"<td>{preds_str}</td>"
+          f"</tr>"
+        )
     html += "</table>"
 
+    #
     # 7-Day Mention Leaders & Headlines
+    #
     html += "<h3>7-Day Mention Leaders & Headlines</h3>"
-    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Avg_Sentiment</th><th>Count_Positive</th><th>Count_Negative</th><th>Count_Neutral</th><th>Total_Headlines</th></tr>"
+    html += (
+      "<table style='border-collapse: collapse;'>"
+      "<tr>"
+        "<th style='padding:4px;'>Ticker</th>"
+        "<th>Avg_Sentiment</th>"
+        "<th>Count_Positive</th>"
+        "<th>Count_Negative</th>"
+        "<th>Count_Neutral</th>"
+        "<th>Total_Headlines</th>"
+      "</tr>"
+    )
     recs = []
-    for t, info in head_data.items():
-        headlines = info['headlines']
-        total     = info['count']
-        pos = info.get('count_positive', 0)
-        neg = info.get('count_negative', 0)
-        neu = info.get('count_neutral', 0)
-        avg_sent = sum(info['daily_sentiment'].values()) / len(info['daily_sentiment']) if info['daily_sentiment'] else 0.0
-        recs.append((t, avg_sent, pos, neg, neu, total, headlines))
-    recs.sort(key=lambda x: x[5], reverse=True)  # sort by total headlines
+    for t, info in head7.items():
+        total   = info.get('count', 0)
+        pos     = info.get('count_positive', 0)
+        neg     = info.get('count_negative', 0)
+        neu     = info.get('count_neutral', 0)
+        dsent   = info.get('daily_sentiment', {})
+        avg_s   = (sum(dsent.values()) / len(dsent)) if dsent else 0.0
+        headlines = info.get('headlines', [])
+        recs.append((t, avg_s, pos, neg, neu, total, headlines))
+
+    recs.sort(key=lambda x: x[5], reverse=True)
     top10 = recs[:10]
-    for t, avg_sent, pos, neg, neu, total, headlines in top10:
-        html += (f"<tr><td style='padding:4px;'>{t}</td>"
-                 f"<td>{avg_sent:.2f}</td><td>{pos}</td><td>{neg}</td><td>{neu}</td><td>{total}</td></tr>")
+
+    for t, avg_s, pos, neg, neu, total, headlines in top10:
+        html += (
+          f"<tr>"
+            f"<td style='padding:4px;'>{t}</td>"
+            f"<td>{avg_s:.2f}</td>"
+            f"<td>{pos}</td>"
+            f"<td>{neg}</td>"
+            f"<td>{neu}</td>"
+            f"<td>{total}</td>"
+          f"</tr>"
+        )
     html += "</table>"
 
-    # Headlines for each top ticker
-    for t, avg_sent, pos, neg, neu, total, headlines in top10:
-        html += f"<p><strong>{t} Headlines:</strong></p><ul>"
-        for title, link, date in headlines:
-            safe_title = title.replace('<','&lt;').replace('>','&gt;')
-            html += f"<li><a href='{link}'>{safe_title}</a> ({date})</li>"
+    # Top 5 headlines per ticker
+    for t, avg_s, pos, neg, neu, total, headlines in top10:
+        html += f"<p><strong>{t} Headlines (up to 5):</strong></p><ul>"
+        for title, link, date in headlines[:5]:
+            safe = title.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+            html += f"<li><a href='{link}' target='_blank'>{safe}</a> ({date})</li>"
         html += "</ul>"
 
-    # 30-Day Sentiment (Portfolio vs Watchlist combined) – using same head_data as placeholder
-    html += "<h3>30-Day Sentiment</h3>"
-    html += "<table style='border-collapse: collapse;'><tr><th style='padding:4px;'>Ticker</th><th>Avg_Sentiment</th><th>Count_Positive</th><th>Count_Negative</th><th>Count_Neutral</th><th>Total_Headlines</th></tr>"
-    for t, info in head_data.items():
-        total = info['count']
-        pos = info.get('count_positive', 0)
-        neg = info.get('count_negative', 0)
-        neu = info.get('count_neutral', 0)
-        avg_sent = sum(info['daily_sentiment'].values()) / len(info['daily_sentiment']) if info['daily_sentiment'] else 0.0
-        html += (f"<tr><td style='padding:4px;'>{t}</td>"
-                 f"<td>{avg_sent:.2f}</td><td>{pos}</td><td>{neg}</td><td>{neu}</td><td>{total}</td></tr>")
-    html += "</table>"
-
-    # Embed collage image if provided
-    if collage_path and os.path.exists(collage_path):
-        html += "<h3>Portfolio & Watchlist Collage</h3>"
-        cid = 'collage_img'
-        html += f"<img src='cid:{cid}' alt='Collage'/>"
-
+    # Attachments note
+    html += "<p>See attached collage images for watchlist & portfolio forecasts.</p>"
     html += "</body></html>"
 
-    # Write HTML report to file
+    # Write HTML to disk
     with open(out_path, "w") as f:
         f.write(html)
     logger.info(f"Report written to {out_path}")
 
-    # Send email with HTML content
+    # Send via SMTP
     if SMTP_HOST and SMTP_USER and SMTP_PASS and EMAIL_TO:
         msg = EmailMessage()
         msg["Subject"] = f"Stock News Forecast — {now}"
         msg["From"]    = SMTP_USER
         msg["To"]      = EMAIL_TO
         msg.add_alternative(html, subtype='html')
-        if collage_path and os.path.exists(collage_path):
-            with open(collage_path, "rb") as img:
-                img_data = img.read()
-            msg.get_payload()[0].add_related(img_data, 'image', 'png', cid=cid)
+
+        # Attach both collages
+        for path in (portfolio_collage, watchlist_collage):
+            if path and os.path.exists(path):
+                with open(path, "rb") as img:
+                    data = img.read()
+                msg.add_attachment(
+                    data,
+                    maintype="image",
+                    subtype="png",
+                    filename=os.path.basename(path)
+                )
         try:
             with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
                 smtp.starttls()

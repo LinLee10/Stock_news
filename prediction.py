@@ -119,9 +119,12 @@ def train_and_forecast(
             .merge(peer_df.rename(columns={"Close":"Peer_Close"}), on="Date", how="outer")
         )
         df.sort_values("Date", inplace=True)
-        df["Close"].ffill(inplace=True)
-        df["Market_Close"].ffill(inplace=True)
-        df["Peer_Close"].ffill(inplace=True)
+        df = df.copy()
+
+        # forward-fill by assignment, not inplace
+        df["Close"]        = df["Close"].ffill()
+        df["Market_Close"] = df["Market_Close"].ffill()
+        df["Peer_Close"]   = df["Peer_Close"].ffill()
 
         df["Return"]     = df["Close"].pct_change()
         df["MR"]         = df["Market_Close"].pct_change()
@@ -250,13 +253,20 @@ def train_predict_stock(
     tree_df, c_tree, r_tree = train_and_forecast(ticker, price_df, mkt_df, peer_df, sentiment_series)
     tree_preds = list(tree_df["Forecast_Close"])
 
+    # merge for LSTM input
     merged = (
         price_df
         .merge(mkt_df.rename(columns={"Close":"Market_Close"}), on="Date", how="outer")
         .merge(peer_df.rename(columns={"Close":"Peer_Close"}), on="Date", how="outer")
     )
     merged.sort_values("Date", inplace=True)
-    merged[["Close","Market_Close","Peer_Close"]] = merged[["Close","Market_Close","Peer_Close"]].ffill()
+
+    # — replaced chained ffill with explicit per-column ffill on a copy —
+    merged = merged.copy()
+    merged["Close"]        = merged["Close"].ffill()
+    merged["Market_Close"] = merged["Market_Close"].ffill()
+    merged["Peer_Close"]   = merged["Peer_Close"].ffill()
+
     merged["Return"]     = merged["Close"].pct_change().fillna(0)
     merged["MR"]         = merged["Market_Close"].pct_change().fillna(0)
     merged["PR"]         = merged["Peer_Close"].pct_change().fillna(0)

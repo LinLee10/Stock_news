@@ -1,3 +1,6 @@
+# news_scraper.py
+
+import os
 import time
 import logging
 import requests
@@ -7,9 +10,17 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from rapidfuzz import fuzz
 from transformers import pipeline
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# ─── Load Alpha Vantage key ───────────────────────────────────────────────────
+load_dotenv("config/secrets.env")
+API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
+if not API_KEY:
+    logger.error("Missing ALPHA_VANTAGE_KEY in config/secrets.env")
+    raise RuntimeError("Set ALPHA_VANTAGE_KEY in config/secrets.env")
 
 # ─── Mapping tickers to canonical company names ─────────────────────────────
 TICKER_COMPANY = {
@@ -24,8 +35,6 @@ TICKER_COMPANY = {
     "MRVL": "Marvell Technology, Inc.",
     "ADI": "Analog Devices, Inc.",
     "LLY": "Eli Lilly and Company",
-    "MSFT": "Microsoft Corporation",
-    "PLTR": "Palantir Technologies Inc.",
     # … add more tickers and company names as needed
 }
 
@@ -48,20 +57,50 @@ def fetch_google_rss(query: str, retries=3) -> str:
         if r.status_code == 200:
             return r.text
         time.sleep(1)
-    logger.warning(f"Failed to fetch RSS for {query}")
+    logger.warning(f"Failed to fetch Google RSS for {query}")
     return ""
 
 def parse_rss(xml_text: str):
     root = ET.fromstring(xml_text)
     for item in root.findall(".//item"):
-        title = item.findtext("title", default="")
-        link  = item.findtext("link",  default="")
-        pub   = item.findtext("pubDate", default="")
+        title = item.findtext("title", "")
+        link  = item.findtext("link", "")
+        pub   = item.findtext("pubDate", "")
         try:
             pub_dt = datetime.strptime(pub, "%a, %d %b %Y %H:%M:%S %Z")
         except Exception:
             pub_dt = datetime.utcnow()
         yield title, link, pub_dt
+
+def fetch_av_news(ticker: str, retries=3):
+    """
+    Pulls Alpha Vantage News Sentiment feed for a ticker.
+    Returns list of (title, url, date) tuples.
+    """
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function":  "NEWS_SENTIMENT",
+        "tickers":   ticker,
+        "apikey":    API_KEY
+    }
+    for _ in range(retries):
+        r = requests.get(url, params=params, timeout=5)
+        if r.status_code == 200:
+            data = r.json().get("feed", [])
+            out = []
+            for item in data:
+                title = item.get("title", "")
+                link  = item.get("url", "")
+                ts    = item.get("time_published", "")
+                try:
+                    pub_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except Exception:
+                    pub_dt = datetime.utcnow()
+                out.append((title, link, pub_dt))
+            return out
+        time.sleep(1)
+    logger.warning(f"Failed to fetch AV news for {ticker}")
+    return []
 
 def smart_match(name: str, headline: str, thresh=75) -> bool:
     hl = headline.lower()
@@ -70,59 +109,67 @@ def smart_match(name: str, headline: str, thresh=75) -> bool:
         return True
     return fuzz.partial_ratio(nm, hl) >= thresh
 
-def scrape_headlines(tickers: list[str]) -> dict[str, dict]:
+def scrape_headlines(tickers: list[str], days: int = 10) -> dict[str, dict]:
     """
-    Returns for each ticker:
+    Returns for each ticker over the past `days` calendar days:
       {
         'headlines':       [(title, link, date), ...],
-        'count':           total_matches,
+        'count':           total_unique_matches,
         'daily_sentiment': {date: avg_score, ...},
         'count_positive':  number_of_positive,
         'count_negative':  number_of_negative,
         'count_neutral':   number_of_neutral
       }
-    over the past 7 calendar days.
+    Combines Google RSS + Alpha Vantage feeds, dedupes overlaps by link.
     """
     today = datetime.utcnow().date()
-    window_start = today - timedelta(days=6)   # 7-day window
+    window_start = today - timedelta(days=days - 1)
     results = {}
     sent_pipe = get_sentiment_pipeline()
 
     for tic in tickers:
-        comp    = TICKER_COMPANY.get(tic, tic)
-        raw_xml = fetch_google_rss(comp)
-        matches = []
-        for title, link, pub_dt in parse_rss(raw_xml):
+        comp = TICKER_COMPANY.get(tic, tic)
+        # 1) fetch both sources
+        google_xml = fetch_google_rss(comp)
+        goog_raw   = list(parse_rss(google_xml))
+        av_raw     = fetch_av_news(tic)
+
+        # 2) filter by date window and smart match
+        combined = []
+        for title, link, pub_dt in goog_raw + av_raw:
             d = pub_dt.date()
-            if not (window_start <= d <= today):
-                continue
-            if smart_match(comp, title):
+            if window_start <= d <= today and smart_match(comp, title):
+                combined.append((title, link, d))
+
+        # 3) dedupe by link
+        seen = set()
+        matches = []
+        for title, link, d in combined:
+            if link and link not in seen:
+                seen.add(link)
                 matches.append((title, link, d))
 
-        # Compute sentiment for each matched headline
+        # 4) sentiment & counts (lowercase matching)
         daily = defaultdict(list)
         count_pos = count_neg = count_neu = 0
         if matches:
             texts = [t for t, _, _ in matches]
             batch = sent_pipe(texts, batch_size=16)
-            labels = []
             scores = []
             for out in batch:
-                label = out["label"]
-                labels.append(label)
-                score_val = out["score"]
-                if label == "POSITIVE":
-                    score = score_val
-                elif label == "NEGATIVE":
-                    score = -score_val
+                lbl = out["label"].lower()
+                val = out["score"]
+                if lbl == "positive":
+                    scores.append(val)
+                    count_pos += 1
+                elif lbl == "negative":
+                    scores.append(-val)
+                    count_neg += 1
                 else:
-                    score = 0.0
-                scores.append(score)
-            count_pos = labels.count("POSITIVE")
-            count_neg = labels.count("NEGATIVE")
-            count_neu = labels.count("NEUTRAL")
+                    scores.append(0.0)
+                    count_neu += 1
 
-            for ((_, _, d), s) in zip(matches, scores):
+            for (_, _, d), s in zip(matches, scores):
                 daily[d].append(s)
 
         daily_mean = {d: sum(v)/len(v) for d, v in daily.items()} if daily else {}
@@ -134,5 +181,6 @@ def scrape_headlines(tickers: list[str]) -> dict[str, dict]:
             "count_negative":  count_neg,
             "count_neutral":   count_neu,
         }
-        logger.info(f"[{tic}] {len(matches)} headlines from {window_start} → {today}")
+        logger.info(f"[{tic}] {len(matches)} unique headlines from {window_start} → {today}")
+
     return results

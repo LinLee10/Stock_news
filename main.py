@@ -19,15 +19,17 @@ WATCHLIST = load_tickers("data/watchlist.csv")
 PORTFOLIO = load_tickers("data/portfolio.csv")
 
 def main():
-    # 1. Scrape headlines & sentiment (7-day window)
+    # 1. Scrape headlines & sentiment
     all_tickers = WATCHLIST + PORTFOLIO
-    head_info   = scrape_headlines(all_tickers)
+    head7  = scrape_headlines(all_tickers, days=7)    # for Top-10 mentions
+    head30 = scrape_headlines(all_tickers, days=30)   # for full 30-day summaries
 
     # 2. Forecast & gather price history
     preds = {}
     price_data, forecast_data, sentiment_map = {}, {}, {}
     for t in all_tickers:
-        daily_sent  = head_info[t]["daily_sentiment"]
+        # ← use the 30-day sentiment series for forecasting
+        daily_sent  = head30[t]["daily_sentiment"]
         sent_series = pd.Series(daily_sent)
         out = train_predict_stock(t, sent_series)
 
@@ -44,35 +46,37 @@ def main():
         sentiment_map[t] = daily_sent
 
     # 3. Create and save collages
-    collage_path = "portfolio_collage.png"
+    portfolio_collage = "portfolio_collage.png"
     create_collage(
         PORTFOLIO,
         price_data,
         forecast_data,
         sentiment_map,
         "Portfolio Forecasts",
-        collage_path
+        portfolio_collage
     )
-    logger.info(f"Saved collage to {collage_path}")
+    logger.info(f"Saved collage to {portfolio_collage}")
 
-    watch_collage = "watchlist_collage.png"
+    watchlist_collage = "watchlist_collage.png"
     create_collage(
         WATCHLIST,
         price_data,
         forecast_data,
         sentiment_map,
         "Watchlist Forecasts",
-        watch_collage
+        watchlist_collage
     )
-    logger.info(f"Saved collage to {watch_collage}")
+    logger.info(f"Saved collage to {watchlist_collage}")
 
-    # 4. Generate & send report (HTML output)
+    # 4. Generate & send report (HTML), passing both windows of headlines
     send_report(
-        WATCHLIST,
-        PORTFOLIO,
-        head_info,
-        preds,
-        collage_path=collage_path,
+        watchlist=WATCHLIST,
+        portfolio=PORTFOLIO,
+        head7=head7,
+        head30=head30,
+        preds=preds,
+        portfolio_collage=portfolio_collage,
+        watchlist_collage=watchlist_collage,
         out_path="report.html"
     )
 
