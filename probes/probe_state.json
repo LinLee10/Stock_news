@@ -1,0 +1,71 @@
+{
+  "probe_session_id": "av-reset-timing-20250831",
+  "created_at": "2025-08-31T02:30:00-07:00",
+  "plan_duration_hours": 72,
+  "services": {
+    "alpha_vantage": {
+      "probe_type": "quota_reset_timing",
+      "total_budget": 6,
+      "daily_budget": 2,
+      "used_budget": 0,
+      "remaining_budget": 6,
+      "probe_schedule": [
+        {
+          "day": 1,
+          "pre_midnight": "2025-09-01T23:58:00Z",
+          "post_midnight": "2025-09-02T00:01:00Z",
+          "status": "scheduled"
+        },
+        {
+          "day": 2, 
+          "pre_midnight": "2025-09-02T23:58:00Z",
+          "post_midnight": "2025-09-03T00:01:00Z",
+          "status": "scheduled"
+        },
+        {
+          "day": 3,
+          "pre_midnight": "2025-09-03T23:58:00Z", 
+          "post_midnight": "2025-09-04T00:01:00Z",
+          "status": "scheduled"
+        }
+      ],
+      "last_probe_at": null,
+      "probe_results": [],
+      "hypothesis": {
+        "h1_utc_midnight": "unknown",
+        "h2_rolling_24h": "unknown", 
+        "conclusion": "pending"
+      }
+    },
+    "newsapi": {
+      "probe_type": "none_required",
+      "status": "confirmed_exhausted",
+      "confirmed_usage": "100/100",
+      "exhausted_at": "2025-08-31T02:22:00Z",
+      "next_reset_estimate": "2025-09-01T00:00:00Z"
+    },
+    "yahoo_finance": {
+      "probe_type": "passive_monitoring", 
+      "status": "healthy_cached",
+      "cache_hit_ratio": "100%",
+      "monitoring_window": "7_days",
+      "next_analysis": "2025-09-07T02:30:00Z"
+    }
+  },
+  "automation": {
+    "github_actions_workflow": ".github/workflows/alpha_vantage_reset_probe.yml",
+    "manual_scripts": "probes/alpha_vantage_reset_plan.md",
+    "results_directory": "probes/",
+    "log_file": "logs/api_usage_log.md"
+  },
+  "risk_assessment": {
+    "budget_utilization": "low_risk",
+    "api_cost": "minimal", 
+    "failure_modes": [
+      "network_timeout",
+      "api_maintenance_window",
+      "quota_already_exhausted"
+    ],
+    "mitigation": "single_attempt_no_retries"
+  }
+}

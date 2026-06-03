@@ -1,0 +1,26 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.cache/
+
+# Virtual environments
+venv/
+.venv/
+.env/
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+.env.dryrun
+config/secrets.env
+secrets/development.env
+*.env
+.env
+
+/secrets/development.env
+/config/secrets.env
+/.env.dryrun

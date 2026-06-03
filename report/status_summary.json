@@ -1,0 +1,158 @@
+{
+  "generated_at": "2025-08-31T02:00:00-07:00",
+  "timezone": "America/Los_Angeles",
+  "rate_limit_state": "Exhausted",
+  "features": {
+    "alpha_vantage_rate_limiting": {
+      "status": "Active",
+      "confidence": "High",
+      "implementation": "Token bucket with priority queuing",
+      "daily_limit": 25,
+      "current_usage": "Exhausted"
+    },
+    "yahoo_finance_caching": {
+      "status": "Active", 
+      "confidence": "High",
+      "implementation": "24h disk cache with circuit breakers",
+      "cache_ttl_hours": 24
+    },
+    "newsapi_quota_management": {
+      "status": "Active",
+      "confidence": "Medium",
+      "implementation": "Simple quota tracking",
+      "daily_limit": 100,
+      "current_usage": "Unknown"
+    },
+    "google_news_scraping": {
+      "status": "Active",
+      "confidence": "High", 
+      "implementation": "RSS feed parsing with retry logic",
+      "rate_limiting": "Respectful delays"
+    },
+    "redis_caching": {
+      "status": "Available",
+      "confidence": "Medium",
+      "implementation": "Response caching and state persistence"
+    }
+  },
+  "apis": {
+    "alpha_vantage": {
+      "provider": "alphavantage.co",
+      "tier": "free",
+      "limits": {
+        "per_minute": 5,
+        "per_day": 25
+      },
+      "current_state": "Exhausted",
+      "confidence": "High"
+    },
+    "yahoo_finance": {
+      "provider": "yfinance (finance.yahoo.com)",
+      "tier": "free",
+      "limits": {
+        "per_hour": 2000,
+        "estimated": true
+      },
+      "current_state": "Healthy",
+      "confidence": "Medium"
+    },
+    "newsapi": {
+      "provider": "newsapi.org", 
+      "tier": "free",
+      "limits": {
+        "per_day": 100
+      },
+      "current_state": "Unknown",
+      "confidence": "Low"
+    },
+    "google_news": {
+      "provider": "news.google.com",
+      "tier": "free",
+      "limits": {
+        "informal": true
+      },
+      "current_state": "Healthy",
+      "confidence": "High"
+    }
+  },
+  "blockers": [
+    {
+      "severity": "Critical",
+      "issue": "Alpha Vantage daily quota exhausted",
+      "impact": "Core stock data unavailable until quota reset",
+      "estimated_resolution": "24h from first daily call"
+    },
+    {
+      "severity": "Medium",
+      "issue": "NewsAPI quota status unknown",
+      "impact": "Potential news ingestion failures",
+      "estimated_resolution": "Immediate - check quota status"
+    },
+    {
+      "severity": "Low", 
+      "issue": "Alpha Vantage reset timing undocumented",
+      "impact": "Cannot predict exact quota renewal time",
+      "estimated_resolution": "Documentation review required"
+    }
+  ],
+  "fast_wins": [
+    {
+      "priority": "High",
+      "action": "Implement quota forecasting dashboard",
+      "effort": "Low",
+      "impact": "Prevents future quota exhaustion"
+    },
+    {
+      "priority": "High", 
+      "action": "Add API key rotation for Alpha Vantage",
+      "effort": "Medium",
+      "impact": "Increases daily quota capacity"
+    },
+    {
+      "priority": "Medium",
+      "action": "Extend cache TTLs for stable data",
+      "effort": "Low", 
+      "impact": "Reduces API call frequency"
+    },
+    {
+      "priority": "Medium",
+      "action": "Implement degraded mode operation",
+      "effort": "Medium",
+      "impact": "System resilience during quota exhaustion"
+    }
+  ],
+  "unknowns": [
+    "Alpha Vantage quota reset timing (24h vs UTC midnight)",
+    "Actual Yahoo Finance rate limits (undocumented)", 
+    "Current NewsAPI quota consumption",
+    "Circuit breaker recovery behavior under sustained load",
+    "Redis availability and persistence guarantees"
+  ],
+  "recommended_execution_windows": {
+    "optimal": [
+      "02:00-06:00 UTC (low API contention)",
+      "14:00-16:00 UTC (post-market)",
+      "20:00-22:00 UTC (off-peak)"
+    ],
+    "avoid": [
+      "14:30-21:00 UTC (market hours)",
+      "Top of hour boundaries (automated system peaks)"
+    ]
+  },
+  "monitoring": {
+    "logging_available": true,
+    "metrics_tracked": [
+      "API response times",
+      "Rate limit hits", 
+      "Cache hit ratios",
+      "Circuit breaker state changes",
+      "Quota consumption by priority"
+    ],
+    "alert_conditions": [
+      "Alpha Vantage quota >90% consumed",
+      "Circuit breaker opens",
+      "Cache miss ratio >50%",
+      "API timeouts >10% of requests"
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "limit_state": "Mixed",
+  "as_of": "2025-08-31T02:00:00-07:00",
+  "details": {
+    "alpha_vantage": {
+      "daily_quota": 25,
+      "confirmed_usage": 0,
+      "state": "Healthy",
+      "note": "0 calls detected in logs - cache protected",
+      "evidence": "pipeline_run.log analysis + SmartCacheManager 25/25 remaining",
+      "probe_scheduled": "72h reset timing verification starting 2025-09-01"
+    },
+    "newsapi": {
+      "daily_quota": 100,
+      "confirmed_usage": 100,
+      "state": "Exhausted",
+      "exhausted_at": "2025-08-31T02:22:00Z",
+      "evidence": "pipeline_run.log:630"
+    },
+    "yahoo_finance": {
+      "state": "Healthy",
+      "cache_enabled": true,
+      "cache_ttl_hours": 24,
+      "evidence": "No rate limit errors in recent logs"
+    },
+    "google_news": {
+      "state": "Healthy",
+      "rate_limiting": "Respectful",
+      "fallback_active": true
+    }
+  },
+  "circuit_breakers": {
+    "implementation": "services/retry_policies.py:98-177",
+    "status": "Verified operational",
+    "test_results": "All state transitions confirmed",
+    "last_tested": "2025-08-31T02:00:00-07:00"
+  },
+  "next_reset_estimate": "2025-09-01T00:00:00Z",
+  "confidence": "High for NewsAPI, Medium for others"
+}

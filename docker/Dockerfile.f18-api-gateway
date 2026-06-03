@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install minimal dependencies
+RUN pip install --no-cache-dir flask requests
+
+# Copy microservices code
+COPY microservices/api_gateway/ /app/microservices/api_gateway/
+COPY microservices/shared/ /app/microservices/shared/
+COPY config/ /app/config/
+
+# Run the gateway service
+EXPOSE 8000
+CMD ["python", "microservices/api_gateway/app.py"]

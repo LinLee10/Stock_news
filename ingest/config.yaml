@@ -1,0 +1,195 @@
+# Compliant Financial News Ingestion Configuration
+
+# Redis connection
+redis:
+  url: "redis://localhost:6379/0"
+  
+# PostgreSQL connection (optional)
+postgresql:
+  enabled: false
+  connection_string: "postgresql://user:pass@localhost/finews"
+
+# Browser settings
+browser:
+  user_agent: "FinancialNewsBot/1.0 (Educational Research; +https://example.com/contact)"
+  contact_email: "bot@example.com"  # Optional From header
+  headless: true
+  timeout_seconds: 30
+
+# Rate limiting (per domain)
+rate_limiting:
+  default_delay_seconds: 12.0  # Minimum delay between requests
+  default_tokens_per_period: 10
+  period_seconds: 600  # 10 minutes
+  max_concurrent_per_domain: 1
+  global_max_concurrent: 5
+
+# Circuit breaker settings
+circuit_breaker:
+  failure_threshold: 5  # Trip after 5 failures
+  recovery_timeout_seconds: 300  # 5 minutes
+
+# Content quality thresholds
+quality:
+  min_word_count: 200
+  min_relevance_score: 0.3
+  min_credibility_score: 0.4
+  duplicate_threshold: 0.8
+  finbert_model: "ProsusAI/finbert"
+  device: "auto"  # auto, cpu, cuda
+
+# Job queue settings
+queues:
+  pending: "jobs:pending"
+  inflight: "jobs:inflight"
+  deadletter: "jobs:deadletter"
+  batch_size: 10
+  worker_timeout_seconds: 300
+
+# Domain-specific policies
+domains:
+  reuters.com:
+    allowed: true
+    crawl_delay_seconds: 15.0
+    max_concurrency: 1
+    credibility_score: 0.95
+    preferred_strategy: "playwright"
+    custom_selectors:
+      article: ".StandardArticleBody_body"
+      title: ".ArticleHeader_headline"
+      author: ".Attribution_container .Attribution_attribution"
+    
+  bloomberg.com:
+    allowed: true
+    crawl_delay_seconds: 20.0
+    max_concurrency: 1
+    credibility_score: 0.95
+    preferred_strategy: "playwright"
+    
+  wsj.com:
+    allowed: true
+    crawl_delay_seconds: 25.0
+    max_concurrency: 1
+    credibility_score: 0.95
+    preferred_strategy: "playwright"
+    
+  cnbc.com:
+    allowed: true
+    crawl_delay_seconds: 12.0
+    max_concurrency: 1
+    credibility_score: 0.90
+    preferred_strategy: "playwright"
+    
+  marketwatch.com:
+    allowed: true
+    crawl_delay_seconds: 12.0
+    max_concurrency: 1
+    credibility_score: 0.85
+    preferred_strategy: "aiohttp"
+    
+  yahoo.com:
+    allowed: true
+    crawl_delay_seconds: 12.0
+    max_concurrency: 2
+    credibility_score: 0.80
+    preferred_strategy: "aiohttp"
+    
+  seekingalpha.com:
+    allowed: true
+    crawl_delay_seconds: 15.0
+    max_concurrency: 1
+    credibility_score: 0.70
+    preferred_strategy: "playwright"
+    
+  # Example of a restricted domain
+  example-restricted.com:
+    allowed: false
+    reason: "Terms of service prohibit automated access"
+
+# Observability
+logging:
+  level: "INFO"
+  format: "json"
+  structured: true
+  
+metrics:
+  enabled: true
+  export_interval_seconds: 60
+  
+# Content extraction selectors (fallbacks)
+extraction:
+  content_selectors:
+    - "article"
+    - "[role='main']"
+    - ".article-content"
+    - ".entry-content"
+    - ".post-content"
+    - ".story-body"
+    - ".article-body"
+    
+  noise_selectors:
+    - "nav"
+    - "header" 
+    - "footer"
+    - "aside"
+    - ".navigation"
+    - ".sidebar"
+    - ".comments"
+    - ".social-share"
+    - ".advertisement"
+    - ".ad"
+    - ".related-articles"
+    - ".newsletter-signup"
+    - ".subscription"
+
+# Financial keyword categories for relevance scoring
+financial_keywords:
+  companies:
+    - "earnings"
+    - "revenue" 
+    - "profit"
+    - "loss"
+    - "quarterly"
+    - "annual"
+    - "ceo"
+    - "cfo"
+    - "dividend"
+    - "shares"
+    - "stock"
+    - "equity"
+    - "merger"
+    - "acquisition"
+    - "ipo"
+    - "buyback"
+    
+  markets:
+    - "nasdaq"
+    - "nyse" 
+    - "dow"
+    - "sp500"
+    - "s&p"
+    - "market"
+    - "trading"
+    - "bull"
+    - "bear"
+    - "volatility"
+    - "futures"
+    - "options"
+    - "index"
+    - "sector"
+    
+  economics:
+    - "fed"
+    - "federal reserve"
+    - "interest rate"
+    - "inflation"
+    - "recession"
+    - "gdp"
+    - "unemployment"
+    - "economic"
+    - "fiscal"
+    - "monetary"
+    - "policy"
+    - "treasury"
+    - "bond"
+    - "yield"

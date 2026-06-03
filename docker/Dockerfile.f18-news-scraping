@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install minimal dependencies
+RUN pip install --no-cache-dir flask feedparser requests
+
+# Copy microservices code
+COPY microservices/news_scraping_service/ /app/microservices/news_scraping_service/
+COPY microservices/shared/ /app/microservices/shared/
+COPY config/ /app/config/
+
+# Run the news scraping service
+EXPOSE 8001
+CMD ["python", "microservices/news_scraping_service/app.py"]

@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stonk-config
+  namespace: stonk-news
+data:
+  # Redis Configuration
+  REDIS_URL: "redis://redis-service:6379"
+  
+  # Kafka Configuration
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+  
+  # Monitoring Configuration
+  PROMETHEUS_ENDPOINT: "http://prometheus-service:9090"
+  JAEGER_ENDPOINT: "http://jaeger-service:14268/api/traces"
+  
+  # Logging Configuration
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+  
+  # Feature Flags Configuration
+  FEATURE_FLAGS_PROVIDER: "local"
+  FEATURE_FLAGS_CACHE_TTL: "300"
+  
+  # Service Discovery
+  NEWS_SERVICE_URL: "http://news-scraping-service:8001"
+  DATA_SERVICE_URL: "http://data-ingestion-service:8002"
+  SENTIMENT_SERVICE_URL: "http://sentiment-analysis-service:8003"
+  RECOMMENDATION_SERVICE_URL: "http://recommendation-service:8004"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:8005"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: stonk-secrets
+  namespace: stonk-news
+type: Opaque
+data:
+  # Base64 encoded secrets (replace with actual values)
+  ALPHA_VANTAGE_API_KEY: "eW91ci1hcGkta2V5LWhlcmU="  # your-api-key-here
+  FINNHUB_API_KEY: "eW91ci1maW5uaHViLWtleQ=="      # your-finnhub-key
+  TELEGRAM_BOT_TOKEN: "eW91ci10ZWxlZ3JhbS10b2tlbg=="  # your-telegram-token
+  EMAIL_PASSWORD: "ZW1haWwtcGFzc3dvcmQ="              # email-password

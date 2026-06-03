@@ -1,0 +1,206 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: news-scraping-deployment
+  namespace: stonk-news
+  labels:
+    app: news-scraping-service
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: news-scraping-service
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: news-scraping-service
+        version: v1
+    spec:
+      serviceAccountName: stonk-service-account
+      containers:
+      - name: news-scraping
+        image: stonk-news/news-scraping-service:latest
+        ports:
+        - containerPort: 8001
+          name: http
+        - containerPort: 9001
+          name: metrics
+        env:
+        - name: SERVICE_NAME
+          value: "news-scraping-service"
+        - name: SERVICE_PORT
+          value: "8001"
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: stonk-config
+              key: REDIS_URL
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: stonk-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: JAEGER_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: stonk-config
+              key: JAEGER_ENDPOINT
+        - name: ALPHA_VANTAGE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: stonk-secrets
+              key: ALPHA_VANTAGE_API_KEY
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+        - name: data-volume
+          mountPath: /app/data
+      volumes:
+      - name: config-volume
+        configMap:
+          name: stonk-config
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: news-scraping-data-pvc
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - news-scraping-service
+              topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: news-scraping-service
+  namespace: stonk-news
+  labels:
+    app: news-scraping-service
+spec:
+  selector:
+    app: news-scraping-service
+  ports:
+  - protocol: TCP
+    port: 8001
+    targetPort: 8001
+    name: http
+  - protocol: TCP
+    port: 9001
+    targetPort: 9001
+    name: metrics
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: news-scraping-data-pvc
+  namespace: stonk-news
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: news-scraping-hpa
+  namespace: stonk-news
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: news-scraping-deployment
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: news_articles_processed_per_second
+      target:
+        type: AverageValue
+        averageValue: "10"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: news-scraping-pdb
+  namespace: stonk-news
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: news-scraping-service

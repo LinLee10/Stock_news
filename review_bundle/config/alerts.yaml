@@ -1,0 +1,124 @@
+# Smart Alerts Configuration
+# Configure thresholds for price moves, sentiment changes, and earnings alerts
+
+# Global default thresholds (applied to all symbols unless overridden)
+defaults:
+  # Price movement alerts
+  price_move_threshold_percent: 5.0          # Alert on price moves > 5%
+  price_move_timeframe_days: 1               # Compare to price N days ago
+  
+  # Sentiment swing alerts  
+  sentiment_threshold_change: 0.3            # Alert on sentiment change > 0.3 (on scale -1 to 1)
+  sentiment_comparison_days: 7               # Compare current vs N-day average
+  
+  # Earnings proximity alerts
+  earnings_alert_days: [7, 3, 1]            # Alert N days before earnings
+  
+  # Alert batching and delivery
+  batch_alerts: true                         # Batch into daily report vs immediate email
+  immediate_email_severity: ["HIGH", "CRITICAL"]  # Send immediate emails for these severities
+  max_alerts_per_symbol_per_day: 3          # Prevent spam
+  
+  # Alert severity thresholds
+  severity_thresholds:
+    price_move:
+      LOW: 3.0      # 3%+ price move
+      MEDIUM: 5.0   # 5%+ price move  
+      HIGH: 10.0    # 10%+ price move
+      CRITICAL: 15.0 # 15%+ price move
+    
+    sentiment:
+      LOW: 0.2      # 0.2 sentiment change
+      MEDIUM: 0.3   # 0.3 sentiment change
+      HIGH: 0.5     # 0.5 sentiment change
+      CRITICAL: 0.7 # 0.7 sentiment change
+    
+    earnings:
+      LOW: 7        # 7 days before earnings
+      MEDIUM: 3     # 3 days before earnings
+      HIGH: 1       # 1 day before earnings
+      CRITICAL: 0   # Earnings today
+
+# Symbol-specific overrides
+symbol_overrides:
+  # High volatility stocks - higher thresholds to reduce noise
+  TSLA:
+    price_move_threshold_percent: 8.0
+    sentiment_threshold_change: 0.4
+    immediate_email_severity: ["CRITICAL"]
+  
+  NVDA:
+    price_move_threshold_percent: 7.0
+    sentiment_threshold_change: 0.4
+  
+  # Conservative stocks - lower thresholds for early detection
+  PFE:
+    price_move_threshold_percent: 3.0
+    sentiment_threshold_change: 0.2
+  
+  JNJ:
+    price_move_threshold_percent: 3.0
+    sentiment_threshold_change: 0.2
+  
+  # Tech stocks - focus on sentiment
+  AAPL:
+    sentiment_threshold_change: 0.25
+    earnings_alert_days: [10, 7, 3, 1]  # More advance notice
+  
+  MSFT:
+    sentiment_threshold_change: 0.25
+    earnings_alert_days: [10, 7, 3, 1]
+  
+  GOOGL:
+    sentiment_threshold_change: 0.25
+    earnings_alert_days: [10, 7, 3, 1]
+
+# Alert message templates
+templates:
+  price_move:
+    title: "Price Alert: {symbol} {direction} {percent}%"
+    description: "{symbol} moved {direction} {percent}% to ${current_price} (was ${previous_price} {timeframe} ago)"
+    guidance: "Monitor for continued momentum. Check news for catalysts. Consider position sizing."
+  
+  sentiment:
+    title: "Sentiment Alert: {symbol} sentiment {direction}"
+    description: "{symbol} sentiment changed from {previous_sentiment:.2f} to {current_sentiment:.2f} ({change:+.2f})"
+    guidance: "Review recent news coverage. Validate sentiment with multiple sources. Consider contrarian opportunities."
+  
+  earnings:
+    title: "Earnings Alert: {symbol} reports in {days} days"
+    description: "{symbol} earnings expected on {date}. Historical volatility around earnings: {avg_volatility}%"
+    guidance: "Review analyst estimates. Consider volatility plays. Set stop-losses if holding through earnings."
+
+# Notification settings
+notifications:
+  # Email settings (when immediate_email_severity triggered)
+  email:
+    enabled: true
+    subject_prefix: "[STONK ALERT]"
+    include_charts: false  # Don't attach charts to immediate emails
+  
+  # Daily report integration
+  daily_report:
+    enabled: true
+    section_title: "Smart Alerts"
+    max_alerts_to_show: 20
+    group_by_symbol: true
+    show_guidance: true
+  
+  # Future: webhook/Slack/SMS integration
+  webhook:
+    enabled: false
+    url: ""
+    
+# Performance and debugging
+performance:
+  cache_lookback_days: 90    # Cache historical data for N days
+  max_processing_time_ms: 5000  # Alert if processing takes > 5 seconds
+  log_alert_decisions: false    # Log all alert evaluations (verbose)
+
+# Security and rate limiting  
+security:
+  max_alerts_per_hour: 50      # Global rate limit
+  alert_cooldown_minutes: 60   # Minimum time between similar alerts
+  validate_data_freshness: true # Skip alerts if data is stale

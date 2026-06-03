@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Financial News Sample Feed</title>
+    <link>https://example.com/finance</link>
+    <description>Sample financial news for testing</description>
+    <lastBuildDate>Mon, 15 Jan 2024 10:00:00 GMT</lastBuildDate>
+    
+    <item>
+      <title>AAPL Stock Analysis Update</title>
+      <link>https://example.com/aapl1</link>
+      <description>Fake analysis of Apple stock performance with positive outlook</description>
+      <pubDate>Mon, 15 Jan 2024 09:30:00 GMT</pubDate>
+      <guid>https://example.com/aapl1</guid>
+    </item>
+    
+    <item>
+      <title>Federal Reserve Rate Decision Expected</title>
+      <link>https://example.com/fed1</link>
+      <description>Fake news about upcoming Fed rate decision impact on markets</description>
+      <pubDate>Mon, 15 Jan 2024 09:00:00 GMT</pubDate>
+      <guid>https://example.com/fed1</guid>
+    </item>
+    
+    <item>
+      <title>Cryptocurrency Market Update</title>
+      <link>https://example.com/crypto1</link>
+      <description>Fake cryptocurrency news showing market trends</description>
+      <pubDate>Mon, 15 Jan 2024 08:45:00 GMT</pubDate>
+      <guid>https://example.com/crypto1</guid>
+    </item>
+    
+    <item>
+      <title>Energy Sector Gains Momentum</title>
+      <link>https://example.com/energy1</link>
+      <description>Fake news about energy sector performance and oil prices</description>
+      <pubDate>Sun, 14 Jan 2024 20:00:00 GMT</pubDate>
+      <guid>https://example.com/energy1</guid>
+    </item>
+    
+    <item>
+      <title>Tesla Earnings Preview</title>
+      <link>https://example.com/tsla1</link>
+      <description>Fake preview of Tesla earnings with analyst expectations</description>
+      <pubDate>Sun, 14 Jan 2024 19:30:00 GMT</pubDate>
+      <guid>https://example.com/tsla1</guid>
+    </item>
+    
+  </channel>
+</rss>

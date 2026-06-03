@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Google News - AAPL</title>
+    <description>Google News feed for AAPL</description>
+    <item>
+      <title>Apple Reports Strong Q3 Earnings Beat</title>
+      <link>https://example.com/news/apple-q3-earnings</link>
+      <pubDate>Wed, 30 Aug 2025 14:30:00 GMT</pubDate>
+      <description>Apple Inc. reported better-than-expected earnings...</description>
+    </item>
+    <item>
+      <title>Apple Stock Rises on AI Announcement</title>
+      <link>https://example.com/news/apple-ai-announcement</link>
+      <pubDate>Tue, 29 Aug 2025 10:15:00 GMT</pubDate>
+      <description>Shares of Apple jumped 5% after the company announced...</description>
+    </item>
+    <item>
+      <title>Apple Supplier Issues Impact Production</title>
+      <link>https://example.com/news/apple-supplier-issues</link>
+      <pubDate>Mon, 28 Aug 2025 16:45:00 GMT</pubDate>
+      <description>Supply chain disruptions could affect iPhone production...</description>
+    </item>
+  </channel>
+</rss>

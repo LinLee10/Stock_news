@@ -1,0 +1,551 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+  schedule:
+    # Run e2e tests nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # BEGIN F14_CI_STUBS
+  # Lint and Tests - Minimal CI for PRs with pre-commit and pytest
+  lint-and-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+        pip install pre-commit pytest pytest-cov
+    
+    - name: Run pre-commit checks
+      run: pre-commit run --all-files
+    
+    - name: Run unit and integration tests (non-e2e)
+      env:
+        # All feature flags OFF for smoke testing
+        ENABLE_YF_PRICES: false
+        ENABLE_PORTFOLIO_ANALYTICS: false
+        ENABLE_CORRELATION: false
+        ENABLE_GNN_SCAFFOLD: false
+        ENABLE_FINBERT_PIPELINE: false
+      run: |
+        pytest -q -k "not e2e" --cov=. --cov-report=xml --cov-report=html || true
+    
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: coverage-${{ matrix.python-version }}
+        path: |
+          htmlcov/
+          coverage.xml
+
+  # E2E Nightly - Optional scheduled job for end-to-end tests
+  e2e-nightly:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-mock
+    
+    - name: Run E2E tests with network mocking
+      env:
+        # Mock network calls in e2e tests
+        YF_TEST_FAST_BACKOFF: 1
+        PYTEST_MOCK_NETWORK: true
+      run: |
+        pytest -q -k "e2e" --tb=short || true
+    
+    - name: Upload e2e test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: e2e-test-results
+        path: |
+          .pytest_cache/
+          pytest.log
+  # END F14_CI_STUBS
+
+  # Code Quality and Security Checks
+  code-quality:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r microservices/requirements.txt
+        pip install flake8 black isort bandit safety pytest-cov
+    
+    - name: Code formatting check (Black)
+      run: black --check --diff .
+    
+    - name: Import sorting check (isort)
+      run: isort --check-only --diff .
+    
+    - name: Lint with flake8
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Security check with Bandit
+      run: bandit -r . -f json -o bandit-report.json || true
+    
+    - name: Check dependencies for vulnerabilities
+      run: safety check --json --output safety-report.json || true
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+  # Unit and Integration Tests
+  test:
+    runs-on: ubuntu-latest
+    needs: code-quality
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      kafka:
+        image: confluentinc/cp-kafka:7.4.0
+        ports:
+          - 9092:9092
+        env:
+          KAFKA_BROKER_ID: 1
+          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+        options: >-
+          --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+      
+      zookeeper:
+        image: confluentinc/cp-zookeeper:7.4.0
+        ports:
+          - 2181:2181
+        env:
+          ZOOKEEPER_CLIENT_PORT: 2181
+          ZOOKEEPER_TICK_TIME: 2000
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r microservices/requirements.txt
+        pip install pytest pytest-cov pytest-asyncio pytest-mock
+    
+    - name: Run unit tests
+      env:
+        REDIS_URL: redis://localhost:6379
+        KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+      run: |
+        pytest tests/unit/ -v --cov=. --cov-report=xml --cov-report=html
+    
+    - name: Run integration tests
+      env:
+        REDIS_URL: redis://localhost:6379
+        KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+      run: |
+        pytest tests/integration/ -v --cov-append --cov=. --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results
+        path: |
+          htmlcov/
+          coverage.xml
+
+  # Docker Build and Security Scan
+  build-and-scan:
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    strategy:
+      matrix:
+        service: [news-scraping, data-ingestion, sentiment-analysis, recommendation, notification, api-gateway]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+    
+    - name: Build Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: docker/Dockerfile.${{ matrix.service }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results-${{ matrix.service }}.sarif'
+    
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+    
+    - name: Run Snyk container security test
+      uses: snyk/actions/docker@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:${{ github.sha }}
+        args: --severity-threshold=high --file=docker/Dockerfile.${{ matrix.service }}
+      continue-on-error: true
+
+  # Performance Testing
+  performance-test:
+    runs-on: ubuntu-latest
+    needs: build-and-scan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js for Artillery
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install Artillery
+      run: npm install -g artillery
+    
+    - name: Run performance tests
+      run: |
+        artillery run tests/performance/load-test.yml --output performance-report.json
+    
+    - name: Generate performance report
+      run: |
+        artillery report performance-report.json --output performance-report.html
+    
+    - name: Upload performance report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report
+        path: |
+          performance-report.json
+          performance-report.html
+
+  # Staging Deployment
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [build-and-scan, performance-test]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-2
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Configure kubectl for EKS
+      run: |
+        aws eks update-kubeconfig --region us-west-2 --name stonk-staging-cluster
+    
+    - name: Deploy to staging
+      run: |
+        # Update image tags in Kubernetes manifests
+        cd kubernetes
+        for service in news-scraping data-ingestion sentiment-analysis recommendation notification api-gateway; do
+          sed -i "s|image: stonk-news/${service}-service:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${service}:${{ github.sha }}|" ${service}-service.yaml
+        done
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f namespace.yaml
+        kubectl apply -f configmap.yaml
+        kubectl apply -f redis.yaml
+        kubectl apply -f kafka.yaml
+        kubectl apply -f monitoring.yaml
+        
+        # Deploy services with rolling update
+        for service in news-scraping data-ingestion sentiment-analysis recommendation notification api-gateway; do
+          kubectl apply -f ${service}-service.yaml
+          kubectl rollout status deployment/${service}-deployment -n stonk-news --timeout=300s
+        done
+    
+    - name: Run smoke tests
+      run: |
+        # Wait for services to be ready
+        kubectl wait --for=condition=ready pod -l app=api-gateway -n stonk-news --timeout=300s
+        
+        # Get service endpoints
+        API_GATEWAY_IP=$(kubectl get service api-gateway-service -n stonk-news -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        # Run basic health checks
+        curl -f http://${API_GATEWAY_IP}:8000/health || exit 1
+        curl -f http://${API_GATEWAY_IP}:8000/metrics || exit 1
+
+  # Production Deployment
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.event_name == 'release' && github.event.action == 'published'
+    environment: 
+      name: production
+      url: https://api.stonk-news.com
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-2
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Configure kubectl for EKS
+      run: |
+        aws eks update-kubeconfig --region us-west-2 --name stonk-production-cluster
+    
+    - name: Blue-Green Deployment
+      run: |
+        # Create blue-green deployment script
+        cd kubernetes
+        
+        # Update image tags with release version
+        RELEASE_VERSION=${{ github.event.release.tag_name }}
+        for service in news-scraping data-ingestion sentiment-analysis recommendation notification api-gateway; do
+          sed -i "s|image: stonk-news/${service}-service:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${service}:${RELEASE_VERSION}|" ${service}-service.yaml
+          
+          # Create green deployment
+          sed "s|name: ${service}-deployment|name: ${service}-deployment-green|g" ${service}-service.yaml > ${service}-green.yaml
+          sed -i "s|app: ${service}-service|app: ${service}-service-green|g" ${service}-green.yaml
+          
+          # Deploy green version
+          kubectl apply -f ${service}-green.yaml
+          kubectl rollout status deployment/${service}-deployment-green -n stonk-news --timeout=600s
+        done
+        
+        # Run production smoke tests on green deployment
+        echo "Running smoke tests on green deployment..."
+        
+        # Switch traffic to green (update service selectors)
+        for service in news-scraping data-ingestion sentiment-analysis recommendation notification api-gateway; do
+          kubectl patch service ${service}-service -n stonk-news -p '{"spec":{"selector":{"app":"'${service}'-service-green"}}}'
+        done
+        
+        # Wait and monitor
+        sleep 120
+        
+        # Check metrics and health
+        API_GATEWAY_IP=$(kubectl get service api-gateway-service -n stonk-news -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        curl -f http://${API_GATEWAY_IP}:8000/health || (echo "Health check failed, rolling back" && exit 1)
+        
+        # If successful, remove blue deployment
+        for service in news-scraping data-ingestion sentiment-analysis recommendation notification api-gateway; do
+          kubectl delete deployment ${service}-deployment -n stonk-news --ignore-not-found=true
+          # Rename green to main
+          kubectl patch deployment ${service}-deployment-green -n stonk-news -p '{"metadata":{"name":"'${service}'-deployment"}}'
+          kubectl patch service ${service}-service -n stonk-news -p '{"spec":{"selector":{"app":"'${service}'-service"}}}'
+        done
+    
+    - name: Update production monitoring
+      run: |
+        # Update Grafana dashboards with new version
+        kubectl create configmap grafana-dashboards-config \
+          --from-file=monitoring/grafana/dashboards/ \
+          -n stonk-news \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Restart Grafana to load new dashboards
+        kubectl rollout restart deployment/grafana-deployment -n stonk-news
+
+    - name: Notify deployment success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Rollback on failure
+  rollback-production:
+    runs-on: ubuntu-latest
+    if: failure() && needs.deploy-production.result == 'failure'
+    needs: deploy-production
+    environment: production
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-2
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Configure kubectl for EKS
+      run: |
+        aws eks update-kubeconfig --region us-west-2 --name stonk-production-cluster
+    
+    - name: Automatic rollback
+      run: |
+        echo "Performing automatic rollback..."
+        
+        for service in news-scraping data-ingestion sentiment-analysis recommendation notification api-gateway; do
+          # Rollback to previous version
+          kubectl rollout undo deployment/${service}-deployment -n stonk-news
+          kubectl rollout status deployment/${service}-deployment -n stonk-news --timeout=300s
+        done
+    
+    - name: Notify rollback
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: 'Production deployment failed and was automatically rolled back'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Tech News Feed</title>
+    <description>General technology news</description>
+    <item>
+      <title>NVIDIA Announces New AI Chip Architecture</title>
+      <link>https://example.com/news/nvidia-new-chip</link>
+      <pubDate>Thu, 31 Aug 2025 09:00:00 GMT</pubDate>
+      <description>NVIDIA unveiled its next-generation AI processing unit...</description>
+    </item>
+    <item>
+      <title>Microsoft Azure Expands Cloud Services</title>
+      <link>https://example.com/news/microsoft-azure-expansion</link>
+      <pubDate>Wed, 30 Aug 2025 11:30:00 GMT</pubDate>
+      <description>Microsoft announced significant expansion of Azure cloud...</description>
+    </item>
+  </channel>
+</rss>

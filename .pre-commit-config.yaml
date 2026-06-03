@@ -1,0 +1,66 @@
+repos:
+  # Black - Python code formatter
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3
+        args: [--line-length=127]
+
+  # isort - Python import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--profile=black, --line-length=127]
+
+  # flake8 - Python linting
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
+        args:
+          - --max-line-length=127
+          - --max-complexity=10
+          - --select=E9,F63,F7,F82
+          - --ignore=E203,W503,E501
+        additional_dependencies:
+          - flake8-docstrings
+          - flake8-import-order
+
+  # Pre-commit hooks for general file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^.*\.(md|txt)$
+      - id: end-of-file-fixer
+        exclude: ^.*\.(md|txt)$
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: check-json
+        exclude: ^.*\.ipynb$
+
+  # Security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args: [-r, ., -f, json, -o, bandit-report.json]
+        pass_filenames: false
+        always_run: true
+
+# Configuration
+default_stages: [commit, push]
+fail_fast: false
+
+# CI configuration
+ci:
+  autofix_commit_msg: 'style: auto-fix pre-commit issues'
+  autofix_prs: true
+  autoupdate_commit_msg: 'chore: pre-commit autoupdate'
+  autoupdate_schedule: weekly

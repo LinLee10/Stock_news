@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Tech News Sample Feed</title>
+    <link>https://example.com/tech</link>
+    <description>Sample tech news for testing</description>
+    <lastBuildDate>Mon, 15 Jan 2024 10:00:00 GMT</lastBuildDate>
+    
+    <item>
+      <title>Fake News Article 1</title>
+      <link>https://example.com/article1</link>
+      <description>This is a fake tech news article for testing purposes</description>
+      <pubDate>Mon, 15 Jan 2024 09:00:00 GMT</pubDate>
+      <guid>https://example.com/article1</guid>
+    </item>
+    
+    <item>
+      <title>AI Breakthrough in Stock Analysis</title>
+      <link>https://example.com/article2</link>
+      <description>Fake article about AI improvements in financial markets</description>
+      <pubDate>Mon, 15 Jan 2024 08:30:00 GMT</pubDate>
+      <guid>https://example.com/article2</guid>
+    </item>
+    
+    <item>
+      <title>Market Volatility Continues</title>
+      <link>https://example.com/article3</link>
+      <description>Fake financial news about market trends</description>
+      <pubDate>Mon, 15 Jan 2024 08:00:00 GMT</pubDate>
+      <guid>https://example.com/article3</guid>
+    </item>
+    
+    <item>
+      <title>Tech Stocks Rally</title>
+      <link>https://example.com/article4</link>
+      <description>Fake news about technology stock performance</description>
+      <pubDate>Sun, 14 Jan 2024 18:00:00 GMT</pubDate>
+      <guid>https://example.com/article4</guid>
+    </item>
+    
+  </channel>
+</rss>
