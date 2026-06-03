@@ -96,6 +96,7 @@ def symbol_intake():
         
         op.step("ticker_validated", metadata={'ticker': ticker, 'company_name': company_name})
         
+        try:
             # Initialize services
             intake_service = SymbolIntakeService()
             job_queue = JobQueue()

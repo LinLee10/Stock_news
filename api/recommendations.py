@@ -51,44 +51,44 @@ def get_recommendations():
             }), 400
         
         try:
-        recs_service = RecommendationsService()
-        
-        if scope == 'watchlist':
-            recommendations = recs_service.generate_watchlist_recommendations(
-                include_details=include_details,
-                max_age_hours=max_age_hours
-            )
-        else:  # portfolio
-            recommendations = recs_service.generate_portfolio_recommendations(
-                include_details=include_details,
-                max_age_hours=max_age_hours
-            )
-        
-        # Add metadata and disclaimer
-        response = {
-            'scope': scope,
-            'generated_at': datetime.utcnow().isoformat(),
-            'recommendations': recommendations,
-            'summary': _generate_summary(recommendations),
-            'meta': {
-                'disclaimer': _get_financial_disclaimer(),
-                'data_freshness_hours': max_age_hours,
-                'recommendation_count': len(recommendations),
-                'feature_flags': {
-                    'news_corroboration': True,  # Would check actual flags
-                    'earnings_analysis': True
+            recs_service = RecommendationsService()
+            
+            if scope == 'watchlist':
+                recommendations = recs_service.generate_watchlist_recommendations(
+                    include_details=include_details,
+                    max_age_hours=max_age_hours
+                )
+            else:  # portfolio
+                recommendations = recs_service.generate_portfolio_recommendations(
+                    include_details=include_details,
+                    max_age_hours=max_age_hours
+                )
+            
+            # Add metadata and disclaimer
+            response = {
+                'scope': scope,
+                'generated_at': datetime.utcnow().isoformat(),
+                'recommendations': recommendations,
+                'summary': _generate_summary(recommendations),
+                'meta': {
+                    'disclaimer': _get_financial_disclaimer(),
+                    'data_freshness_hours': max_age_hours,
+                    'recommendation_count': len(recommendations),
+                    'feature_flags': {
+                        'news_corroboration': True,  # Would check actual flags
+                        'earnings_analysis': True
+                    }
                 }
             }
-        }
-        
-        return jsonify(response), 200
-        
-    except Exception as e:
-        logger.exception(f"Error generating {scope} recommendations")
-        return jsonify({
-            'error': 'Internal server error',
-            'details': str(e) if logger.level <= logging.DEBUG else 'See logs for details'
-        }), 500
+            
+            return jsonify(response), 200
+            
+        except Exception as e:
+            logger.exception(f"Error generating {scope} recommendations")
+            return jsonify({
+                'error': 'Internal server error',
+                'details': str(e) if logger.level <= logging.DEBUG else 'See logs for details'
+            }), 500
 
 def _generate_summary(recommendations: list) -> dict:
     """Generate summary statistics for recommendations"""

@@ -1,14 +1,9 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from .feature_flags import feature_flags
 
 DOTENV_PATH = Path(__file__).parent / "secrets.env"
 load_dotenv(DOTENV_PATH)
-
-print(f"→ Loading secrets from {DOTENV_PATH!r}: exists? {DOTENV_PATH.exists()}")
-print("→ ALPHA_VANTAGE_KEY =", os.getenv("ALPHA_VANTAGE_KEY"))
-print("→ Feature flags loaded:", feature_flags.get_all_flags())
 
 ALPHA_VANTAGE_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 if not ALPHA_VANTAGE_KEY:

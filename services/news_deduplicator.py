@@ -15,6 +15,8 @@ from typing import Dict, List, Set, Optional, Tuple, NamedTuple
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from collections import defaultdict
+from difflib import SequenceMatcher
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 try:
     import redis
@@ -30,7 +32,15 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
-from rapidfuzz import fuzz
+try:
+    from rapidfuzz import fuzz
+except ImportError:
+    class _FuzzFallback:
+        @staticmethod
+        def ratio(left: str, right: str) -> float:
+            return SequenceMatcher(None, left, right).ratio() * 100
+
+    fuzz = _FuzzFallback()
 
 # BEGIN F11 - Vector search integration
 try:
@@ -760,7 +770,7 @@ def canonicalize_url(url: str) -> str:
         return ""
     
     try:
-        parsed = urlparse(url.lower())
+        parsed = urlparse(url.strip())
         
         # Remove common tracking parameters
         tracking_params = {
@@ -768,31 +778,27 @@ def canonicalize_url(url: str) -> str:
             'gclid', 'fbclid', 'ref', '_source', 'source', 'campaign',
             'medium', 'content', 'term', 'mc_cid', 'mc_eid'
         }
+
+        filtered_params = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in tracking_params
+        ]
+        filtered_params.sort(key=lambda item: (item[0].lower(), item[1]))
+        new_query = urlencode(filtered_params, doseq=True)
+
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        if scheme == "http" and netloc.endswith(":80"):
+            netloc = netloc[:-3]
+        elif scheme == "https" and netloc.endswith(":443"):
+            netloc = netloc[:-4]
         
-        if parsed.query:
-            query_params = parse_qs(parsed.query)
-            filtered_params = {k: v for k, v in query_params.items() 
-                             if k.lower() not in tracking_params}
-            
-            # Reconstruct query string
-            if filtered_params:
-                import urllib.parse
-                new_query = urllib.parse.urlencode(filtered_params, doseq=True)
-            else:
-                new_query = ""
-        else:
-            new_query = ""
-        
-        # Reconstruct canonical URL
-        canonical = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-        if new_query:
-            canonical += f"?{new_query}"
-        
-        return canonical
+        return urlunparse((scheme, netloc, parsed.path, "", new_query, ""))
         
     except Exception:
         # Fallback to simple normalization
-        return url.lower().split('?')[0] if '?' in url else url.lower()
+        return url.strip().split('?')[0].lower() if '?' in url else url.strip().lower()
 
 
 def dedupe_headlines_simple(headlines: List[Tuple[str, str, datetime]], threshold: float = 0.8) -> List[Tuple[str, str, datetime]]:
