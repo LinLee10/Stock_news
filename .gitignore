@@ -24,3 +24,10 @@ secrets/development.env
 /secrets/development.env
 /config/secrets.env
 /.env.dryrun
+
+# Generated local dry-run outputs
+artifacts/
+log.txt
+*.log
+*.sqlite3
+*.db
