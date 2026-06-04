@@ -24,7 +24,7 @@ class ProviderValidationTests(unittest.TestCase):
         self.assertEqual(
             names,
             {
-                "google_news_rss",
+                "google_news_rss_search",
                 "yahoo_finance_rss",
                 "cnbc_rss",
                 "marketwatch_rss",
@@ -36,7 +36,7 @@ class ProviderValidationTests(unittest.TestCase):
         )
 
     def test_rss_provider_requires_no_key(self):
-        result = validate_provider("google_news_rss", environ={})
+        result = validate_provider("google_news_rss_search", environ={})
 
         self.assertEqual(result.key_state, "not_required")
         self.assertEqual(result.last_status, "dry_run_ok")

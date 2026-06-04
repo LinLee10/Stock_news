@@ -23,6 +23,7 @@ class ProviderUsageRecorder:
         latency_ms: int = 0,
         error_class: str | None = None,
         metadata: dict[str, object] | None = None,
+        run_id: str | None = None,
     ) -> int:
         usage = ProviderUsage(
             provider=provider,
@@ -34,4 +35,4 @@ class ProviderUsageRecorder:
             error_class=error_class,
             metadata=metadata or {},
         )
-        return self.store.record_provider_usage(usage)
+        return self.store.record_provider_usage(usage, run_id=run_id)

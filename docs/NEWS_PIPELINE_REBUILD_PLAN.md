@@ -222,6 +222,10 @@ No sender should read secrets at import time or print configuration values.
 - Add `LocalFileSender` tests before real sender integration.
 - Add Resend sender, then SMTP/existing sender fallback.
 
+#### Manual VS Code Dry-Run Workflow
+
+Until live provider wiring and email sending are explicitly enabled, the daily manual workflow is to open the repository in VS Code and run `python -B -m news_pipeline.cli dry-run-daily --run-date YYYY-MM-DD --artifacts-dir artifacts` from the integrated terminal. This command uses only local RSS fixtures, writes report artifacts under `artifacts/runs/YYYY-MM-DD/`, and does not call live APIs or send email.
+
 ### Phase 9: Migration
 
 - Wire existing entrypoints to `news_pipeline` behind a feature flag or explicit command.

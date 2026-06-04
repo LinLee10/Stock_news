@@ -67,6 +67,15 @@ class TickerConfigTests(unittest.TestCase):
         self.assertEqual({ticker.symbol for ticker in match_tickers(text, "portfolio")}, {"PLTR"})
         self.assertEqual({ticker.symbol for ticker in match_tickers(text, "watchlist")}, {"CRWV"})
 
+    def test_ambiguous_short_tickers_require_market_or_company_context(self):
+        self.assertEqual({ticker.symbol for ticker in match_tickers("The robotic arm moved the sample.")}, set())
+        self.assertEqual({ticker.symbol for ticker in match_tickers("A meta-analysis reviewed trial data.")}, set())
+        self.assertEqual({ticker.symbol for ticker in match_tickers("MU variant cases declined.")}, set())
+
+        self.assertEqual({ticker.symbol for ticker in match_tickers("ARM stock fell with chip shares.")}, {"ARM"})
+        self.assertEqual({ticker.symbol for ticker in match_tickers("Meta enters the enterprise AI race.")}, {"META"})
+        self.assertEqual({ticker.symbol for ticker in match_tickers("Micron reported stronger memory revenue.")}, {"MU"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,8 +22,8 @@ class ProviderConfig:
 
 
 PROVIDER_REGISTRY: dict[str, ProviderConfig] = {
-    "google_news_rss": ProviderConfig(
-        name="google_news_rss",
+    "google_news_rss_search": ProviderConfig(
+        name="google_news_rss_search",
         provider_type="rss",
         limit_type="best_effort",
         reset_window="none",

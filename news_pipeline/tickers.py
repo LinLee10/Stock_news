@@ -53,6 +53,47 @@ WATCHLIST: tuple[TrackedTicker, ...] = (
 )
 
 
+AMBIGUOUS_TICKER_TERMS = {
+    "ADI",
+    "ARM",
+    "GEV",
+    "META",
+    "MU",
+    "Arm",
+    "Meta",
+}
+
+STOCK_CONTEXT_TERMS = {
+    "ai",
+    "analyst",
+    "buy",
+    "chip",
+    "company",
+    "earnings",
+    "estimate",
+    "forecast",
+    "investor",
+    "market",
+    "nasdaq",
+    "news",
+    "nyse",
+    "price",
+    "rally",
+    "revenue",
+    "sell",
+    "semiconductor",
+    "share",
+    "shares",
+    "stock",
+    "stocks",
+    "target",
+    "ticker",
+    "trade",
+    "trading",
+    "upgrade",
+}
+
+
 def load_portfolio() -> tuple[TrackedTicker, ...]:
     return PORTFOLIO
 
@@ -78,7 +119,7 @@ def match_tickers(text: str, group: TickerGroup | None = None) -> tuple[TrackedT
     """Match configured tickers against headline or article text."""
     matches: list[TrackedTicker] = []
     for ticker in _select_group(group):
-        if any(_contains_term(text, term) for term in ticker.match_terms):
+        if any(_contains_relevant_term(text, ticker, term) for term in ticker.match_terms):
             matches.append(ticker)
     return tuple(matches)
 
@@ -93,3 +134,29 @@ def _select_group(group: TickerGroup | None) -> tuple[TrackedTicker, ...]:
 
 def _contains_term(text: str, term: str) -> bool:
     return re.search(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", text, re.IGNORECASE) is not None
+
+
+def _contains_relevant_term(text: str, ticker: TrackedTicker, term: str) -> bool:
+    matches = list(_term_matches(text, term))
+    if not matches:
+        return False
+    if not _term_needs_context(ticker, term):
+        return True
+    return any(_has_stock_context(text, match) for match in matches)
+
+
+def _term_matches(text: str, term: str) -> Iterable[re.Match[str]]:
+    return re.finditer(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", text, re.IGNORECASE)
+
+
+def _term_needs_context(ticker: TrackedTicker, term: str) -> bool:
+    if term in AMBIGUOUS_TICKER_TERMS:
+        return True
+    return ticker.symbol in AMBIGUOUS_TICKER_TERMS and term in {ticker.symbol, ticker.company_name}
+
+
+def _has_stock_context(text: str, match: re.Match[str]) -> bool:
+    start = max(0, match.start() - 100)
+    end = min(len(text), match.end() + 100)
+    context = text[start:end]
+    return any(_contains_term(context, term) for term in STOCK_CONTEXT_TERMS)

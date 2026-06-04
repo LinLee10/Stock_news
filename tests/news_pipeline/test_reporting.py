@@ -7,6 +7,7 @@ from news_pipeline.reporting import (
     ArticleLink,
     DailyReportInput,
     EmergingNameRow,
+    EventClusterRow,
     MentionLeaderRow,
     MostMentionedRow,
     PortfolioSentimentRow,
@@ -23,12 +24,14 @@ class ReportingTests(unittest.TestCase):
             output_dir = Path(report.output_dir)
             self.assertEqual(output_dir, Path(temp_dir) / "artifacts" / "runs" / "2026-06-03")
             self.assertTrue(output_dir.exists())
-            self.assertEqual(len(report.csv_attachments), 5)
-            self.assertEqual(len(report.chart_attachments), 2)
+            self.assertEqual(len(report.csv_attachments), 6)
+            self.assertEqual(len(report.chart_attachments), 3)
             for attachment in report.csv_attachments + report.chart_attachments:
                 path = Path(attachment)
                 self.assertTrue(path.exists())
                 self.assertTrue(path.is_relative_to(output_dir))
+            self.assertTrue(Path(report.html_preview_report).exists())
+            self.assertTrue(Path(report.html_preview_report).is_relative_to(output_dir))
             self.assertIn("Daily report for 2026-06-03", report.daily_summary)
 
     def test_report_tables_and_links_are_in_contract(self):
@@ -36,10 +39,13 @@ class ReportingTests(unittest.TestCase):
             report = build_daily_report(_fake_report_input(), artifacts_dir=Path(temp_dir))
 
             self.assertEqual(report.portfolio_30d_sentiment_table[0].ticker, "AAPL")
+            self.assertEqual(report.watchlist_sentiment_table[0].ticker, "NVDA")
             self.assertEqual(report.watchlist_next_close_table[0].next_close_direction, "up")
             self.assertEqual(report.mention_leaders_7d_table[0].ticker, "NVDA")
             self.assertEqual(len(report.top_10_most_mentioned_table), 10)
             self.assertEqual(report.emerging_names_table[0].ticker, "ARM")
+            self.assertEqual(report.recency_sections["today_signal"][0].ticker, "NVDA")
+            self.assertEqual(report.top_event_clusters[0].ticker, "AAPL")
             self.assertEqual(report.supporting_article_links["AAPL"][0].url, "https://example.com/aapl")
 
     def test_csv_attachment_contains_expected_rows(self):
@@ -53,6 +59,29 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(rows[0]["ticker"], "AAPL")
             self.assertEqual(rows[0]["sentiment_basis"], "full_text")
 
+    def test_report_output_caps_visible_links_and_event_clusters(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report = build_daily_report(_large_link_report_input(), artifacts_dir=Path(temp_dir))
+            html = Path(report.html_preview_report).read_text(encoding="utf-8")
+
+            self.assertIn("Today&#x27;s Signal", html)
+            self.assertIn("Recent Pulse", html)
+            self.assertIn("Weekly Trend", html)
+            self.assertIn("Background Context", html)
+            self.assertIn("Portfolio Recency Sentiment", html)
+            self.assertIn("Watchlist Recency Sentiment", html)
+            self.assertIn("Top 7 Day Mention Leaders", html)
+            self.assertIn("Emerging Names Based On Mention Velocity", html)
+            self.assertIn("Top Event Clusters By Recency And Source Diversity", html)
+            self.assertIn("Article Links Grouped By Ticker And Event Cluster", html)
+            self.assertIn("This report is not investment advice", html)
+            self.assertIn("deterministic placeholder logic", html)
+            self.assertIn("+2 more in JSON artifacts", html)
+            self.assertIn("+5 more links in JSON artifacts", html)
+            self.assertIn("Event 4", html)
+            self.assertNotIn("Event 5", html)
+            self.assertNotIn("Article 14", html)
+
     def test_default_output_dir_is_repo_artifacts_runs_not_root(self):
         report = build_daily_report(_fake_report_input(), artifacts_dir="artifacts")
         output_dir = Path(report.output_dir)
@@ -62,16 +91,24 @@ class ReportingTests(unittest.TestCase):
         finally:
             for attachment in report.csv_attachments + report.chart_attachments:
                 Path(attachment).unlink(missing_ok=True)
+            Path(report.html_preview_report).unlink(missing_ok=True)
             output_dir.rmdir()
-            (Path("artifacts") / "runs").rmdir()
+            try:
+                (Path("artifacts") / "runs").rmdir()
+            except OSError:
+                pass
 
 
 def _fake_report_input() -> DailyReportInput:
     return DailyReportInput(
         report_date="2026-06-03",
         portfolio_sentiment=(
-            PortfolioSentimentRow("AAPL", "Apple Inc.", 0.42, 12, "full_text"),
-            PortfolioSentimentRow("MSFT", "Microsoft Corp.", 0.12, 8, "snippet"),
+            PortfolioSentimentRow("AAPL", "Apple Inc.", 0.42, 12, "full_text", 0.5, 0.3, 0.1, 0.0, 0.35, 2, 5, 9, "limited_history", 2),
+            PortfolioSentimentRow("MSFT", "Microsoft Corp.", 0.12, 8, "snippet", 0.1, 0.2, 0.0, 0.0, 0.13, 1, 4, 6, "limited_history", 1),
+        ),
+        watchlist_sentiment=(
+            PortfolioSentimentRow("NVDA", "NVIDIA", 0.31, 19, "snippet", 0.4, 0.2, 0.1, 0.0, 0.29, 3, 8, 14, "limited_history", 3),
+            PortfolioSentimentRow("TSLA", "Tesla", -0.14, 5, "title", -0.2, -0.1, 0.0, 0.0, -0.16, 1, 2, 4, "limited_history", 1),
         ),
         watchlist_forecasts=(
             WatchlistForecastRow("NVDA", "up", 0.73, "positive sentiment and mentions"),
@@ -91,6 +128,46 @@ def _fake_report_input() -> DailyReportInput:
         article_links_by_ticker={
             "AAPL": (
                 ArticleLink("Apple earnings coverage", "https://example.com/aapl", "Example"),
+            )
+        },
+        event_clusters_by_ticker={
+            "AAPL": (
+                EventClusterRow("AAPL", "Apple earnings coverage", "https://example.com/aapl", 1, 1, 1),
+            )
+        },
+    )
+
+
+def _large_link_report_input() -> DailyReportInput:
+    return DailyReportInput(
+        report_date="2026-06-03",
+        portfolio_sentiment=(
+            PortfolioSentimentRow("AAPL", "Apple Inc.", 0.1, 15, "snippet", 0.2, 0.1, 0.0, 0.0, 0.15, 2, 6, 10, "limited_history", 3),
+        ),
+        watchlist_sentiment=(
+            PortfolioSentimentRow("NVDA", "NVIDIA", 0.2, 8, "snippet", 0.3, 0.2, 0.0, 0.0, 0.24, 1, 4, 7, "limited_history", 2),
+        ),
+        article_links_by_ticker={
+            "AAPL": tuple(
+                ArticleLink(f"Article {index}", f"https://example.com/aapl/{index}", "Example")
+                for index in range(15)
+            )
+        },
+        event_clusters_by_ticker={
+            "AAPL": tuple(
+                EventClusterRow(
+                    "AAPL",
+                    f"Event {index}",
+                    f"https://example.com/event/{index}",
+                    2,
+                    2,
+                    5,
+                    supporting_links=tuple(
+                        ArticleLink(f"Supporting {index}-{link}", f"https://example.com/event/{index}/{link}", "Example")
+                        for link in range(5)
+                    ),
+                )
+                for index in range(7)
             )
         },
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from difflib import SequenceMatcher
 import hashlib
 import re
@@ -10,6 +11,7 @@ from typing import Callable, Iterable
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse, urlunparse
 
 from .models import Article
+from .tickers import match_tickers
 
 
 TRACKING_PARAMS = {
@@ -59,11 +61,26 @@ SemanticSimilarity = Callable[[Article, Article], float | None]
 
 
 @dataclass(frozen=True)
+class SourceLink:
+    title: str
+    url: str
+    publisher: str | None
+    provider: str | None
+    published_at: str | None
+
+
+@dataclass(frozen=True)
 class DedupeCluster:
     canonical_article: Article
     alternate_source_links: tuple[str, ...]
     articles: tuple[Article, ...]
     duplicate_reasons: tuple[str, ...]
+    primary_link: str
+    supporting_links: tuple[SourceLink, ...]
+    publisher_count: int
+    source_count: int
+    publisher_names: tuple[str, ...]
+    source_providers: tuple[str, ...]
 
 
 def canonicalize_url(url: str) -> str:
@@ -185,18 +202,21 @@ class _MutableCluster:
     duplicate_reasons: list[str]
 
     def to_public(self) -> DedupeCluster:
-        links = tuple(
-            dict.fromkeys(
-                article.canonical_url
-                for article in self.articles
-                if article.canonical_url != self.canonical_article.canonical_url
-            )
-        )
+        supporting_links = tuple(_source_link(article) for article in self.articles)
+        links = tuple(dict.fromkeys(link.url for link in supporting_links if link.url != self.canonical_article.canonical_url))
+        publisher_names = tuple(sorted({link.publisher for link in supporting_links if link.publisher}))
+        source_providers = tuple(sorted({link.provider for link in supporting_links if link.provider}))
         return DedupeCluster(
             canonical_article=self.canonical_article,
             alternate_source_links=links,
             articles=tuple(self.articles),
             duplicate_reasons=tuple(self.duplicate_reasons),
+            primary_link=self.canonical_article.canonical_url,
+            supporting_links=supporting_links,
+            publisher_count=len(publisher_names),
+            source_count=len(source_providers),
+            publisher_names=publisher_names,
+            source_providers=source_providers,
         )
 
 
@@ -210,8 +230,16 @@ def _duplicate_reason(
 ) -> str | None:
     if article.canonical_url == canonical.canonical_url:
         return "exact_url"
-    if title_similarity(article.title, canonical.title) >= title_threshold:
+    if normalize_title(article.title) == normalize_title(canonical.title):
+        return "exact_title"
+    if _ticker_sets_compatible(article, canonical) and title_similarity(article.title, canonical.title) >= title_threshold:
         return "similar_title"
+    if (
+        _ticker_sets_compatible(article, canonical)
+        and _same_ticker_near_publish_date(article, canonical)
+        and title_similarity(article.title, canonical.title) >= 0.55
+    ):
+        return "same_ticker_near_publish_date"
     if semantic_similarity is not None:
         score = semantic_similarity(article, canonical)
         if score is not None and score >= semantic_threshold:
@@ -263,3 +291,45 @@ def _title_tokens(normalized_title: str) -> set[str]:
         for token in normalized_title.split()
         if token and token not in TITLE_STOPWORDS
     }
+
+
+def _same_ticker_near_publish_date(article: Article, canonical: Article) -> bool:
+    article_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(article))}
+    canonical_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(canonical))}
+    if not article_tickers or not canonical_tickers or not (article_tickers & canonical_tickers):
+        return False
+    article_date = _parse_date(article.published_at)
+    canonical_date = _parse_date(canonical.published_at)
+    if article_date is None or canonical_date is None:
+        return False
+    return abs((article_date.date() - canonical_date.date()).days) <= 1
+
+
+def _ticker_sets_compatible(article: Article, canonical: Article) -> bool:
+    article_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(article))}
+    canonical_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(canonical))}
+    return not article_tickers or not canonical_tickers or bool(article_tickers & canonical_tickers)
+
+
+def _parse_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _article_match_text(article: Article) -> str:
+    return " ".join(part for part in (article.title, article.snippet or "") if part)
+
+
+def _source_link(article: Article) -> SourceLink:
+    metadata = article.metadata
+    return SourceLink(
+        title=article.title,
+        url=article.canonical_url,
+        publisher=metadata.get("source_name") or metadata.get("publisher"),
+        provider=metadata.get("provider"),
+        published_at=article.published_at,
+    )

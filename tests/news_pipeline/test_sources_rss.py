@@ -1,6 +1,6 @@
 import unittest
 
-from news_pipeline.sources.rss import RssSource
+from news_pipeline.sources.rss import RssSource, clean_rss_snippet
 
 
 RSS_FIXTURE = """<?xml version="1.0"?>
@@ -32,6 +32,14 @@ class RssSourceTests(unittest.TestCase):
         self.assertEqual(articles[0].metadata["provider"], "google_news_rss")
         self.assertEqual(articles[0].metadata["source_name"], "Example Wire")
         self.assertIn("2024-01-15T10:00:00", articles[0].published_at)
+
+    def test_clean_rss_snippet_removes_google_news_html(self):
+        snippet = (
+            '<a href="https://news.google.com/rss/articles/abc">NVIDIA stock jumps</a>'
+            "&nbsp;&nbsp;<font color=\"#6f6f6f\">Example Publisher</font>"
+        )
+
+        self.assertEqual(clean_rss_snippet(snippet), "NVIDIA stock jumps Example Publisher")
 
 
 if __name__ == "__main__":

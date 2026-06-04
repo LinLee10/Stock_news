@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from email.utils import parsedate_to_datetime
+from html import unescape
+import re
 import xml.etree.ElementTree as ET
 
 from .base import NewsSource, SourceCandidate, candidate_to_article
@@ -33,7 +35,7 @@ class RssSource(NewsSource):
                     provider=self.provider_name,
                     url=link,
                     title=title,
-                    snippet=(item.findtext("description") or item.findtext("summary") or "").strip() or None,
+                    snippet=clean_rss_snippet(item.findtext("description") or item.findtext("summary")),
                     published_at=_parse_rss_date(item.findtext("pubDate") or item.findtext("published")),
                     source_name=(item.findtext("source") or channel_source or "").strip() or None,
                 )
@@ -51,3 +53,12 @@ def _parse_rss_date(value: str | None) -> str | None:
         return parsedate_to_datetime(value).isoformat()
     except (TypeError, ValueError):
         return value.strip() or None
+
+
+def clean_rss_snippet(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = unescape(value)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None

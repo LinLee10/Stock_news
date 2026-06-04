@@ -21,6 +21,9 @@ class ProviderUsageTests(unittest.TestCase):
                 "sentiment_results",
                 "provider_usage",
                 "runs",
+                "run_articles",
+                "provider_validation",
+                "dedupe_clusters",
             }.issubset(self.store.table_names())
         )
 
