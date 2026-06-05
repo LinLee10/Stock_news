@@ -32,6 +32,7 @@ class SourceQualityTests(unittest.TestCase):
         self.assertEqual(assess_article_source(_article("https://finance.yahoo.com/news/nvda", "Yahoo Finance")).tier, TIER_2_USABLE)
         self.assertEqual(assess_article_source(_article("https://stocktwits.com/nvda", "Stocktwits")).tier, TIER_3_LOW_PRIORITY)
         self.assertEqual(assess_article_source(_article("https://mshale.com/nvda", "Mshale")).tier, TIER_4_EXCLUDE_BY_DEFAULT)
+        self.assertEqual(assess_article_source(_article("https://foreignpolicyjournal.com/crwv", "")).tier, TIER_4_EXCLUDE_BY_DEFAULT)
 
     def test_tier_4_sources_are_hidden_from_visible_email_by_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -70,6 +71,23 @@ class SourceQualityTests(unittest.TestCase):
         self.assertIn("NVDA Mshale noisy page", email_html)
         self.assertEqual(payload["visible_article_count"], 2)
         self.assertEqual(payload["excluded_article_count"], 0)
+
+    def test_foreignpolicyjournal_is_excluded_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stdout = _run_cli(
+                temp_dir,
+                articles=[
+                    _article("https://www.cnbc.com/crwv-quality", "CNBC", title="CRWV signs cloud customer"),
+                    _article("https://foreignpolicyjournal.com/crwv-noise", "", title="CRWV foreignpolicyjournal noisy page"),
+                ],
+            )
+            payload = json.loads(stdout)
+            email_html = (Path(payload["output_dir"]) / "email_preview.html").read_text(encoding="utf-8")
+
+        self.assertIn("CRWV signs cloud customer", email_html)
+        self.assertNotIn("CRWV foreignpolicyjournal noisy page", email_html)
+        self.assertEqual(payload["visible_article_count"], 1)
+        self.assertEqual(payload["excluded_article_count"], 1)
 
     def test_tier_3_sources_are_lower_priority_than_better_sources(self):
         result = filter_articles_by_source_quality(
@@ -114,10 +132,15 @@ class SourceQualityTests(unittest.TestCase):
             payload = json.loads(stdout)
             email_html = (Path(payload["output_dir"]) / "email_preview.html").read_text(encoding="utf-8")
 
-        self.assertIn("Hidden lower-priority sources: Stocktwits.", email_html)
+        self.assertIn("Hidden lower priority publishers: Stocktwits.", email_html)
+        self.assertIn("Visible high quality publishers: CNBC, Yahoo Finance.", email_html)
         self.assertNotIn("low-quality sources: CNBC", email_html)
         self.assertNotIn("Excluded or hidden low-quality sources", email_html)
-        self.assertNotIn("CNBC.", email_html.split("Source Quality Summary", 1)[1].split("Article Extraction Summary", 1)[0])
+        source_section = email_html.split("Source Quality Summary", 1)[1].split("Article Extraction Summary", 1)[0]
+        self.assertNotIn("Excluded articles by filter: CNBC", source_section)
+        self.assertNotIn("Hidden lower priority publishers: CNBC", source_section)
+        self.assertNotIn("Excluded articles by filter: Yahoo Finance", source_section)
+        self.assertNotIn("Hidden lower priority publishers: Yahoo Finance", source_section)
 
     def test_source_quality_summary_appears_and_fixture_wording_is_removed_for_live_report(self):
         live_feed = """<?xml version="1.0"?>

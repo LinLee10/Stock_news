@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from email.message import EmailMessage
+from html import escape
 import json
 import mimetypes
 import os
 from pathlib import Path
+import re
 import smtplib
 from typing import Mapping, Protocol, Sequence
 
@@ -232,6 +234,7 @@ def build_report_email_payload(
             html_body=_html_for_delivery_mode(
                 preview_path.read_text(encoding="utf-8"),
                 delivery_mode=delivery_mode,
+                attachments=manifest.attachments,
             ),
             plain_text_body=_plain_text_body(
                 run_date=run_date,
@@ -296,10 +299,15 @@ def _required_report_artifacts(output_dir: Path) -> tuple[Path, ...]:
     )
 
 
-def _html_for_delivery_mode(html: str, *, delivery_mode: str) -> str:
+def _html_for_delivery_mode(
+    html: str,
+    *,
+    delivery_mode: str,
+    attachments: tuple[AttachmentManifestItem, ...] = (),
+) -> str:
     if delivery_mode != REAL_SEND_MODE:
         return html
-    return (
+    rendered = (
         html.replace(
             "<strong>Preview only:</strong> This file is a local email preview. No SMTP, Gmail, Resend, or other live email provider was contacted.",
             "<strong>Sent email report:</strong> delivered through the configured SMTP sender.",
@@ -308,16 +316,26 @@ def _html_for_delivery_mode(html: str, *, delivery_mode: str) -> str:
             "<strong>Preview only:</strong> no live email provider was contacted.",
             "<strong>Sent email report:</strong> delivered through the configured SMTP sender.",
         )
-        .replace("<h2>Intended Attachments</h2>", "<h2>Attached CSV Files</h2>")
-        .replace(
-            "These local files would be attached by a future live email sender.",
-            "Attached CSV files.",
-        )
-        .replace(
-            "These files would be attached.",
-            "Attached CSV files.",
-        )
     )
+    attachment_html = _render_real_attachment_section(attachments)
+    return re.sub(
+        r"\s*<h2>(?:Intended Attachments|Attached CSV Files|Attachments)</h2>\s*"
+        r"<p>.*?</p>\s*<ul>.*?</ul>",
+        "\n" + attachment_html,
+        rendered,
+        count=1,
+        flags=re.DOTALL,
+    )
+
+
+def _render_real_attachment_section(attachments: tuple[AttachmentManifestItem, ...]) -> str:
+    rows = ["    <h2>Attachments</h2>", "    <p>Attached CSV files.</p>", "    <ul>"]
+    if attachments:
+        rows.extend(f"      <li>{escape(item.filename)}</li>" for item in attachments)
+    else:
+        rows.append("      <li>No attachments were included.</li>")
+    rows.append("    </ul>")
+    return "\n".join(rows)
 
 
 def _plain_text_body(

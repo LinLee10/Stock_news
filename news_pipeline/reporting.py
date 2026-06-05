@@ -374,6 +374,8 @@ def _write_html_preview(
         "    th{background:#eef3f8}",
         "    .note{background:#fff8e6;border-left:4px solid #c98900;padding:12px;margin:12px 0 20px}",
         "    .summary{background:#edf7f1;border-left:4px solid #248a4b;padding:12px;margin:12px 0 20px}",
+        "    .briefing{background:#f0f6ff;border-left:4px solid #2563eb;padding:12px;margin:12px 0 20px}",
+        "    .briefing ul{margin:8px 0 0;padding-left:20px}",
         "    .empty{color:#64748b}",
         "    .muted{color:#64748b;font-size:13px}",
         "    .num{text-align:right}",
@@ -384,6 +386,7 @@ def _write_html_preview(
         f"  <div class=\"note\"><strong>Data source:</strong> {escape(report_input.data_source_label)}. No paid APIs were called and no email was sent.</div>",
         "  <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic, and watchlist direction rows are not real predictions. This report is not investment advice.</div>",
         f"  <div class=\"summary\">{escape(_plain_english_summary(report_input, top_10))}</div>",
+        _top_briefing_html(report_input, top_10),
         "  <h2>Plain English Readout</h2>",
         "  <ul>",
         f"    <li>{escape(_sentiment_movers_sentence(report_input))}</li>",
@@ -391,6 +394,8 @@ def _write_html_preview(
         f"    <li>{escape(_attention_sentence(report_input))}</li>",
         "    <li>All sentiment basis labels are shown as full_text, snippet, title, or no_articles.</li>",
         "  </ul>",
+        _event_clusters_html(report_input.event_clusters_by_ticker),
+        _article_links_html(report_input.article_links_by_ticker),
         _source_quality_summary_html(report_input.extraction_summary.source_quality_summary),
         _extraction_summary_html(report_input.extraction_summary),
         _recency_sections_html(report_input),
@@ -400,8 +405,6 @@ def _write_html_preview(
         _mention_leaders_html(report_input.mention_leaders_7d),
         _top_10_html(top_10),
         _emerging_names_html(report_input.emerging_names),
-        _event_clusters_html(report_input.event_clusters_by_ticker),
-        _article_links_html(report_input.article_links_by_ticker),
         "</body>",
         "</html>",
     ]
@@ -442,6 +445,65 @@ def _recency_sections_html(report_input: DailyReportInput) -> str:
                 "article_count_30d",
             ),
         ]
+    )
+
+
+def _top_briefing_html(
+    report_input: DailyReportInput,
+    top_10: tuple[MostMentionedRow, ...],
+) -> str:
+    bullets = [
+        _top_mention_bullet(top_10),
+        _event_bullet(report_input, direction="negative"),
+        _event_bullet(report_input, direction="positive"),
+        _quality_caveat_bullet(report_input),
+        "Watchlist direction rows are placeholder direction from current report sentiment, not predictions.",
+    ]
+    return "\n".join(
+        [
+            "  <section class=\"briefing\">",
+            "    <h2>Daily Briefing</h2>",
+            "    <ul>",
+            *[f"      <li>{escape(bullet)}</li>" for bullet in bullets if bullet][:5],
+            "    </ul>",
+            "  </section>",
+        ]
+    )
+
+
+def _top_mention_bullet(top_10: tuple[MostMentionedRow, ...]) -> str:
+    if top_10:
+        leader = top_10[0]
+        return f"Top mention leader: {leader.ticker} with {leader.mentions} current report mention(s)."
+    return "Top mention leader: no configured ticker had measurable current report volume."
+
+
+def _event_bullet(report_input: DailyReportInput, *, direction: str) -> str:
+    clusters = _top_event_clusters(report_input.event_clusters_by_ticker)
+    scored = [cluster for cluster in clusters if cluster.weighted_cluster_sentiment is not None]
+    if not scored:
+        if direction == "negative":
+            return "Biggest negative event: no clearly negative scored event cluster was available."
+        return "High-attention event: no scored event clusters were available."
+    if direction == "negative":
+        cluster = min(scored, key=lambda item: (item.weighted_cluster_sentiment or 0.0, -item.article_count))
+        if (cluster.weighted_cluster_sentiment or 0.0) >= 0:
+            return "Biggest negative event: no clearly negative scored event cluster was available."
+        return f"Biggest negative event: {cluster.ticker} - {cluster.title}."
+    cluster = max(scored, key=lambda item: ((item.weighted_cluster_sentiment or 0.0), item.article_count))
+    if (cluster.weighted_cluster_sentiment or 0.0) > 0:
+        return f"Biggest positive event: {cluster.ticker} - {cluster.title}."
+    high_attention = max(clusters, key=lambda item: (item.article_count, item.source_count), default=cluster)
+    return f"High-attention event: {high_attention.ticker} - {high_attention.title}."
+
+
+def _quality_caveat_bullet(report_input: DailyReportInput) -> str:
+    source_summary = report_input.extraction_summary.source_quality_summary
+    extraction = report_input.extraction_summary
+    return (
+        f"Source filters show {source_summary.visible_articles} visible article(s) and "
+        f"{source_summary.excluded_articles} excluded article(s); full text extraction succeeded for "
+        f"{extraction.successful_extractions} article(s), with snippet/title fallbacks still used."
     )
 
 
@@ -502,11 +564,18 @@ def _source_quality_summary_html(summary: SourceQualitySummary) -> str:
 def _excluded_sources_html(summary: SourceQualitySummary) -> str:
     parts = []
     if summary.excluded_sources:
-        parts.append(f"Excluded by source/title filters: {_source_list(summary.excluded_sources)}.")
+        parts.append(f"Excluded articles by filter: {_source_list(summary.excluded_sources)}.")
     if summary.hidden_sources:
-        parts.append(f"Hidden lower-priority sources: {_source_list(summary.hidden_sources)}.")
+        parts.append(f"Hidden lower priority publishers: {_source_list(summary.hidden_sources)}.")
+    visible_high_quality = tuple(
+        source
+        for source in getattr(summary, "visible_sources", ())
+        if source not in set(summary.unclassified_sources)
+    )
+    if visible_high_quality:
+        parts.append(f"Visible high quality publishers: {_source_list(visible_high_quality)}.")
     if summary.unclassified_sources:
-        parts.append(f"Unclassified sources kept as usable: {_source_list(summary.unclassified_sources)}.")
+        parts.append(f"Unclassified publishers shown: {_source_list(summary.unclassified_sources)}.")
     if not parts:
         parts.append("No source quality exclusions or lower-priority hides were applied.")
     return f"  <p class=\"muted\">{escape(' '.join(parts))}</p>"
@@ -590,7 +659,7 @@ def _recency_bucket_html(
             f"<td class=\"num\">{getattr(row, sentiment_field):.4f}</td>"
             f"<td class=\"num\">{getattr(row, count_field)}</td>"
             f"<td class=\"num\">{row.source_diversity}</td>"
-            f"<td>{escape(row.mention_velocity)}</td>"
+            f"<td>{escape(_display_velocity(row.mention_velocity))}</td>"
             "</tr>"
             for row in ranked
         )
@@ -619,7 +688,7 @@ def _sentiment_table_html(title: str, rows: tuple[PortfolioSentimentRow, ...]) -
         f"<td class=\"num\">{row.article_count_3d}</td>"
         f"<td class=\"num\">{row.article_count_7d}</td>"
         f"<td class=\"num\">{row.article_count_30d}</td>"
-        f"<td>{escape(row.mention_velocity)}</td>"
+        f"<td>{escape(_display_velocity(row.mention_velocity))}</td>"
         f"<td class=\"num\">{row.source_diversity}</td>"
         f"<td>{escape(row.sentiment_basis)}</td>"
         "</tr>"
@@ -820,3 +889,7 @@ def _quality_rank(label: str) -> int:
         "tier_4_exclude_by_default": 1,
     }
     return ranks.get(label, 3)
+
+
+def _display_velocity(value: str) -> str:
+    return "history building" if value == "limited_history" else value

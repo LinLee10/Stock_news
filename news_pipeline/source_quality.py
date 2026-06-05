@@ -184,6 +184,7 @@ class SourceQualitySummary:
     excluded_tier_counts: dict[str, int] = field(default_factory=dict)
     excluded_sources: tuple[str, ...] = ()
     hidden_sources: tuple[str, ...] = ()
+    visible_sources: tuple[str, ...] = ()
     unclassified_sources: tuple[str, ...] = ()
     min_source_quality_tier: int = DEFAULT_MIN_SOURCE_QUALITY_TIER
     include_low_quality_sources: bool = False
@@ -205,6 +206,7 @@ class SourceQualitySummary:
             "excluded_tier_counts": dict(self.excluded_tier_counts),
             "excluded_sources": list(self.excluded_sources),
             "hidden_sources": list(self.hidden_sources),
+            "visible_sources": list(self.visible_sources),
             "unclassified_sources": list(self.unclassified_sources),
             "min_source_quality_tier": self.min_source_quality_tier,
             "include_low_quality_sources": self.include_low_quality_sources,
@@ -413,6 +415,12 @@ def _summary(
             article
             for article in excluded
             if assess_article_source(article).tier == TIER_3_LOW_PRIORITY
+        ),
+        visible_sources=_source_names(
+            article
+            for article in visible
+            if assess_article_source(article).tier <= TIER_2_USABLE
+            and assess_article_source(article).label != UNKNOWN_SOURCE_LABEL
         ),
         unclassified_sources=_source_names(
             article

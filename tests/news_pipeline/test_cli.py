@@ -332,9 +332,13 @@ class CliTests(unittest.TestCase):
             self.assertIn("Watchlist Recency Sentiment", preview)
             self.assertIn("Article Links Grouped By Ticker And Event Cluster", preview)
             self.assertIn("https://example.com/news/nvidia-new-chip", preview)
+            self.assertLess(preview.index("Daily Briefing"), preview.index("Source Quality Summary"))
+            self.assertLess(preview.index("Top Event Clusters"), preview.index("Source Quality Summary"))
             self.assertIn("Intended Attachments", preview)
             self.assertIn("portfolio_30d_sentiment.csv", preview)
-            self.assertIn("watchlist_sentiment.svg", preview)
+            self.assertNotIn("watchlist_sentiment.svg", preview)
+            self.assertNotIn("limited_history", preview)
+            self.assertIn("history building", preview)
             self.assertTrue(payload["intended_email_attachments"])
 
     def test_dry_run_daily_default_does_not_attempt_live_rss(self):
@@ -596,6 +600,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("Article Extraction Summary", markdown)
             self.assertIn("Article Extraction Summary", html)
             self.assertIn("Article Extraction Summary", email_html)
+            self.assertLess(email_html.index("Daily Briefing"), email_html.index("Article Extraction Summary"))
             self.assertIn("Extraction Basis", html)
             self.assertIn("Extraction Basis", email_html)
             for diagnostic in (

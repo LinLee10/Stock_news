@@ -186,8 +186,10 @@ class EmailSenderCliTests(unittest.TestCase):
         html = fake_sender.sent_payloads[0].html_body
         self.assertIn("Sent email report:", html)
         self.assertIn("delivered through the configured SMTP sender.", html)
-        self.assertIn("Attached CSV Files", html)
+        self.assertIn("<h2>Attachments</h2>", html)
         self.assertIn("Attached CSV files.", html)
+        self.assertIn("portfolio_30d_sentiment.csv", html)
+        self.assertNotIn("watchlist_sentiment.svg", html)
         self.assertNotIn("Preview only:", html)
         self.assertNotIn("future live email sender", html)
 
@@ -242,6 +244,7 @@ def _write_report_artifacts(temp_dir):
         "<html><body>"
         "<div><strong>Preview only:</strong> This file is a local email preview. No SMTP, Gmail, Resend, or other live email provider was contacted.</div>"
         "<h2>Intended Attachments</h2><p>These files would be attached.</p>"
+        "<ul><li>portfolio_30d_sentiment.csv</li><li>watchlist_sentiment.svg</li></ul>"
         "</body></html>",
         encoding="utf-8",
     )
