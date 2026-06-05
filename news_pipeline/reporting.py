@@ -20,6 +20,14 @@ class ArticleLink:
 
 
 @dataclass(frozen=True)
+class ExtractionSummary:
+    article_pages_fetched: int = 0
+    successful_extractions: int = 0
+    failed_extractions: int = 0
+    sentiment_basis_counts: Mapping[str, int] = field(default_factory=lambda: {"full_text": 0, "snippet": 0, "title": 0})
+
+
+@dataclass(frozen=True)
 class EventClusterRow:
     ticker: str
     title: str
@@ -33,6 +41,7 @@ class EventClusterRow:
     recency_bucket: str = "unknown"
     tickers_mentioned: tuple[str, ...] = ()
     weighted_cluster_sentiment: float | None = None
+    extraction_basis: str = "not_fetched"
     supporting_links: tuple[ArticleLink, ...] = ()
 
 
@@ -98,6 +107,7 @@ class DailyReportInput:
     emerging_names: tuple[EmergingNameRow, ...] = ()
     article_links_by_ticker: Mapping[str, tuple[ArticleLink, ...]] = field(default_factory=dict)
     event_clusters_by_ticker: Mapping[str, tuple[EventClusterRow, ...]] = field(default_factory=dict)
+    extraction_summary: ExtractionSummary = field(default_factory=ExtractionSummary)
 
 
 @dataclass(frozen=True)
@@ -114,6 +124,7 @@ class DailyReportContract:
     top_event_clusters: tuple[EventClusterRow, ...]
     event_clusters_by_ticker: Mapping[str, tuple[EventClusterRow, ...]]
     supporting_article_links: Mapping[str, tuple[ArticleLink, ...]]
+    extraction_summary: ExtractionSummary
     csv_attachments: tuple[str, ...]
     chart_attachments: tuple[str, ...]
     html_preview_report: str
@@ -208,6 +219,7 @@ def build_daily_report(
         top_event_clusters=top_event_clusters,
         event_clusters_by_ticker=report_input.event_clusters_by_ticker,
         supporting_article_links=report_input.article_links_by_ticker,
+        extraction_summary=report_input.extraction_summary,
         csv_attachments=csv_attachments,
         chart_attachments=chart_attachments,
         html_preview_report=html_preview_report,
@@ -356,6 +368,7 @@ def _write_html_preview(
         f"    <li>{escape(_attention_sentence(report_input))}</li>",
         "    <li>All sentiment basis labels are shown as full_text, snippet, title, or no_articles.</li>",
         "  </ul>",
+        _extraction_summary_html(report_input.extraction_summary),
         _recency_sections_html(report_input),
         _sentiment_table_html("Portfolio Recency Sentiment", report_input.portfolio_sentiment),
         _sentiment_table_html("Watchlist Recency Sentiment", report_input.watchlist_sentiment),
@@ -404,6 +417,26 @@ def _recency_sections_html(report_input: DailyReportInput) -> str:
                 "background_context_sentiment",
                 "article_count_30d",
             ),
+        ]
+    )
+
+
+def _extraction_summary_html(summary: ExtractionSummary) -> str:
+    basis_counts = {basis: int(summary.sentiment_basis_counts.get(basis, 0)) for basis in ("full_text", "snippet", "title")}
+    return "\n".join(
+        [
+            "  <h2>Article Extraction Summary</h2>",
+            "  <table>",
+            "    <tr><th>Article Pages Fetched</th><th>Successful Extractions</th><th>Failed Extractions</th><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{summary.article_pages_fetched}</td>"
+            f"<td class=\"num\">{summary.successful_extractions}</td>"
+            f"<td class=\"num\">{summary.failed_extractions}</td>"
+            f"<td class=\"num\">{basis_counts['full_text']}</td>"
+            f"<td class=\"num\">{basis_counts['snippet']}</td>"
+            f"<td class=\"num\">{basis_counts['title']}</td>"
+            "</tr>",
+            "  </table>",
         ]
     )
 
@@ -588,7 +621,7 @@ def _event_clusters_html(clusters_by_ticker: Mapping[str, tuple[EventClusterRow,
         shown = True
         body.append(f"  <h3>{escape(ticker)}</h3>")
         body.append("  <table>")
-        body.append("    <tr><th>Event</th><th>Bucket</th><th>Sentiment</th><th>First Seen</th><th>Latest Seen</th><th>Articles</th><th>Publishers</th><th>Sources</th><th>Visible Links</th></tr>")
+        body.append("    <tr><th>Event</th><th>Bucket</th><th>Sentiment</th><th>Extraction Basis</th><th>First Seen</th><th>Latest Seen</th><th>Articles</th><th>Publishers</th><th>Sources</th><th>Visible Links</th></tr>")
         for cluster in visible_clusters:
             links = list(cluster.supporting_links[:3])
             links_html = "<br>".join(
@@ -602,6 +635,7 @@ def _event_clusters_html(clusters_by_ticker: Mapping[str, tuple[EventClusterRow,
                 f"<td><a href=\"{escape(cluster.primary_link, quote=True)}\">{escape(cluster.title)}</a></td>"
                 f"<td>{escape(cluster.recency_bucket)}</td>"
                 f"<td class=\"num\">{_format_optional_score(cluster.weighted_cluster_sentiment)}</td>"
+                f"<td>{escape(cluster.extraction_basis)}</td>"
                 f"<td>{escape(cluster.first_seen_at or '')}</td>"
                 f"<td>{escape(cluster.latest_seen_at or '')}</td>"
                 f"<td class=\"num\">{cluster.article_count}</td>"

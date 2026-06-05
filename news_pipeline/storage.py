@@ -148,6 +148,26 @@ class SQLiteStore:
                 article_ids_json TEXT NOT NULL DEFAULT '[]',
                 UNIQUE(run_id, cluster_index)
             );
+
+            CREATE TABLE IF NOT EXISTS article_extractions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                article_id TEXT NOT NULL,
+                canonical_url TEXT NOT NULL,
+                extraction_status TEXT NOT NULL,
+                extraction_basis TEXT NOT NULL,
+                error_class TEXT,
+                final_url TEXT,
+                latency_ms INTEGER NOT NULL DEFAULT 0,
+                content_type TEXT,
+                content_length INTEGER NOT NULL DEFAULT 0,
+                text_hash TEXT,
+                extracted_preview TEXT,
+                extractor TEXT,
+                fetched INTEGER NOT NULL DEFAULT 0,
+                tickers_json TEXT NOT NULL DEFAULT '[]',
+                UNIQUE(run_id, article_id)
+            );
             """
         )
         self._ensure_column("runs", "run_date", "TEXT")
@@ -167,6 +187,7 @@ class SQLiteStore:
         self._ensure_column("dedupe_clusters", "publisher_names_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("dedupe_clusters", "source_providers_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("dedupe_clusters", "supporting_links_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("article_extractions", "tickers_json", "TEXT NOT NULL DEFAULT '[]'")
         self.connection.commit()
 
     def reset_run(self, run_id: str) -> None:
@@ -177,6 +198,7 @@ class SQLiteStore:
             "DELETE FROM provider_usage WHERE run_id = ? OR metadata_json LIKE ?",
             (run_id, legacy_metadata_pattern),
         )
+        self.connection.execute("DELETE FROM article_extractions WHERE run_id = ?", (run_id,))
         self.connection.execute("DELETE FROM dedupe_clusters WHERE run_id = ?", (run_id,))
         self.connection.execute("DELETE FROM sentiment_results WHERE run_id = ?", (run_id,))
         self.connection.execute("DELETE FROM ticker_mentions WHERE run_id = ?", (run_id,))
@@ -453,6 +475,55 @@ class SQLiteStore:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def record_article_extraction(
+        self,
+        *,
+        run_id: str,
+        article_id: str,
+        canonical_url: str,
+        extraction_status: str,
+        extraction_basis: str,
+        error_class: str | None = None,
+        final_url: str | None = None,
+        latency_ms: int = 0,
+        content_type: str | None = None,
+        content_length: int = 0,
+        text_hash: str | None = None,
+        extracted_preview: str | None = None,
+        extractor: str | None = None,
+        fetched: bool = False,
+        tickers: Iterable[str] = (),
+    ) -> int:
+        cursor = self.connection.execute(
+            """
+            INSERT OR REPLACE INTO article_extractions (
+                run_id, article_id, canonical_url, extraction_status, extraction_basis,
+                error_class, final_url, latency_ms, content_type, content_length,
+                text_hash, extracted_preview, extractor, fetched, tickers_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                article_id,
+                canonical_url,
+                extraction_status,
+                extraction_basis,
+                error_class,
+                final_url,
+                latency_ms,
+                content_type,
+                content_length,
+                text_hash,
+                extracted_preview,
+                extractor,
+                1 if fetched else 0,
+                json.dumps(list(tickers), sort_keys=True),
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def list_provider_usage(self) -> list[dict[str, object]]:
         rows = self.connection.execute(
             "SELECT * FROM provider_usage ORDER BY id ASC"
@@ -510,6 +581,13 @@ class SQLiteStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_article_extractions(self, run_id: str) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            "SELECT * FROM article_extractions WHERE run_id = ? ORDER BY id ASC",
+            (run_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_dedupe_clusters(self, run_id: str) -> list[dict[str, object]]:
         rows = self.connection.execute(
             "SELECT * FROM dedupe_clusters WHERE run_id = ? ORDER BY cluster_index ASC",
@@ -541,6 +619,8 @@ class SQLiteStore:
                 SELECT article_id FROM ticker_mentions
                 UNION
                 SELECT article_id FROM sentiment_results
+                UNION
+                SELECT article_id FROM article_extractions
             )
             """
         )

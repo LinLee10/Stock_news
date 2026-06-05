@@ -28,6 +28,44 @@ LIVE_RSS_FIXTURE = """<?xml version="1.0"?>
 </rss>
 """
 
+MULTI_LIVE_RSS_FIXTURE = """<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Live Mock Finance</title>
+    <item>
+      <title>NVIDIA beats earnings expectations</title>
+      <link>https://live.example.com/news/nvidia-live-1</link>
+      <pubDate>Wed, 3 Jun 2026 10:00:00 GMT</pubDate>
+      <source>Live Mock Wire</source>
+      <description>NVDA stock earnings news from a mocked live RSS source.</description>
+    </item>
+    <item>
+      <title>NVIDIA stock upgraded by analyst</title>
+      <link>https://live.example.com/news/nvidia-live-2</link>
+      <pubDate>Wed, 3 Jun 2026 11:00:00 GMT</pubDate>
+      <source>Live Mock Wire</source>
+      <description>NVDA stock analyst rating news from a mocked live RSS source.</description>
+    </item>
+    <item>
+      <title>NVIDIA faces antitrust lawsuit</title>
+      <link>https://live.example.com/news/nvidia-live-3</link>
+      <pubDate>Wed, 3 Jun 2026 12:00:00 GMT</pubDate>
+      <source>Live Mock Wire</source>
+      <description>NVDA stock legal news from a mocked live RSS source.</description>
+    </item>
+  </channel>
+</rss>
+"""
+
+ARTICLE_HTML = """<!doctype html>
+<html>
+  <head><title>NVIDIA article page</title></head>
+  <body>
+    <article><p>NVIDIA reports weak demand and a loss in this full article.</p></article>
+  </body>
+</html>
+"""
+
 
 class FakeProvider:
     def __init__(self, article):
@@ -49,6 +87,14 @@ class FakeHttpResponse:
 
     def read(self):
         return self.body
+
+
+class FakeArticleResponse(FakeHttpResponse):
+    url = "https://publisher.example.com/final-article"
+
+    def __init__(self, body):
+        super().__init__(body)
+        self.headers = {"Content-Type": "text/html; charset=utf-8"}
 
 
 class CliTests(unittest.TestCase):
@@ -160,7 +206,6 @@ class CliTests(unittest.TestCase):
             contract = json.loads((output_dir / "report_contract.json").read_text(encoding="utf-8"))["report"]
             markdown = (output_dir / "daily_report.md").read_text(encoding="utf-8")
             html = (output_dir / "daily_report.html").read_text(encoding="utf-8")
-
             self.assertGreater(collected["article_count"], 0)
             self.assertTrue(any("NVIDIA" in article["title"] for article in collected["articles"]))
             self.assertEqual(
@@ -407,6 +452,145 @@ class CliTests(unittest.TestCase):
             self.assertEqual(usage_rows[0]["status"], "failure")
             self.assertEqual(usage_rows[0]["error_class"], "TimeoutError")
 
+    def test_dry_run_daily_default_does_not_fetch_article_pages(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("news_pipeline.article_fetch.urlopen", side_effect=AssertionError("article pages must be opt-in")):
+                stdout = _run_cli("dry-run-daily", temp_dir)
+            payload = json.loads(stdout)
+            output_dir = Path(payload["output_dir"])
+            extractions = json.loads((output_dir / "article_extractions.json").read_text(encoding="utf-8"))
+
+            self.assertFalse(payload["live_article_fetch_enabled"])
+            self.assertEqual(payload["article_pages_fetched"], 0)
+            self.assertGreater(payload["sentiment_basis_counts"]["snippet"], 0)
+            self.assertFalse(extractions["article_fetch"]["enabled"])
+            self.assertEqual(extractions["article_fetch"]["attempted_fetches"], 0)
+
+    def test_enable_live_article_fetch_fetches_top_live_cluster(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("news_pipeline.sources.live_rss.urlopen", return_value=FakeHttpResponse(LIVE_RSS_FIXTURE)):
+                with patch("news_pipeline.article_fetch.urlopen", return_value=FakeArticleResponse(ARTICLE_HTML)) as article_urlopen:
+                    stdout = _run_cli(
+                        "dry-run-daily",
+                        temp_dir,
+                        extra_args=[
+                            "--enable-live-rss",
+                            "--enable-live-article-fetch",
+                            "--live-rss-url",
+                            "https://example.com/rss/nvda.xml",
+                            "--live-rss-retries",
+                            "0",
+                        ],
+                    )
+            payload = json.loads(stdout)
+            output_dir = Path(payload["output_dir"])
+            collected = json.loads((output_dir / "collected_articles.json").read_text(encoding="utf-8"))
+            extractions = json.loads((output_dir / "article_extractions.json").read_text(encoding="utf-8"))["article_fetch"]
+            scores = json.loads((output_dir / "sentiment_scores.json").read_text(encoding="utf-8"))["scores"]
+            report_html = (output_dir / "daily_report.html").read_text(encoding="utf-8")
+
+            self.assertTrue(payload["live_article_fetch_enabled"])
+            self.assertEqual(article_urlopen.call_count, 1)
+            self.assertEqual(payload["article_pages_fetched"], 1)
+            self.assertEqual(payload["successful_extractions"], 1)
+            self.assertEqual(extractions["attempted_fetches"], 1)
+            self.assertEqual(extractions["successful_extractions"], 1)
+            self.assertEqual(extractions["records"][0]["extraction_basis"], "full_text")
+            self.assertTrue(collected["articles"][0]["has_full_text"])
+            self.assertEqual(scores[0]["basis"], "full_text")
+            self.assertEqual(scores[0]["label"], "negative")
+            self.assertIn("Article Extraction Summary", report_html)
+            self.assertIn("<td class=\"num\">1</td>", report_html)
+            self.assertIn("full_text", report_html)
+
+    def test_live_article_fetch_caps_are_enforced(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("news_pipeline.sources.live_rss.urlopen", return_value=FakeHttpResponse(MULTI_LIVE_RSS_FIXTURE)):
+                with patch("news_pipeline.article_fetch.urlopen", return_value=FakeArticleResponse(ARTICLE_HTML)) as article_urlopen:
+                    stdout = _run_cli(
+                        "dry-run-daily",
+                        temp_dir,
+                        extra_args=[
+                            "--enable-live-rss",
+                            "--enable-live-article-fetch",
+                            "--live-rss-url",
+                            "https://example.com/rss/nvda.xml",
+                            "--live-rss-retries",
+                            "0",
+                            "--max-article-fetches",
+                            "3",
+                            "--max-fetches-per-ticker",
+                            "2",
+                        ],
+                    )
+            payload = json.loads(stdout)
+            output_dir = Path(payload["output_dir"])
+            extractions = json.loads((output_dir / "article_extractions.json").read_text(encoding="utf-8"))["article_fetch"]
+
+            self.assertEqual(payload["article_count"], 3)
+            self.assertEqual(article_urlopen.call_count, 2)
+            self.assertEqual(extractions["attempted_fetches"], 2)
+            self.assertEqual(extractions["max_fetches_per_ticker"], 2)
+
+    def test_live_article_fetch_failures_do_not_fail_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("news_pipeline.sources.live_rss.urlopen", return_value=FakeHttpResponse(LIVE_RSS_FIXTURE)):
+                with patch("news_pipeline.article_fetch.urlopen", side_effect=TimeoutError("article timeout")):
+                    stdout = _run_cli(
+                        "dry-run-daily",
+                        temp_dir,
+                        extra_args=[
+                            "--enable-live-rss",
+                            "--enable-live-article-fetch",
+                            "--live-rss-url",
+                            "https://example.com/rss/nvda.xml",
+                            "--live-rss-retries",
+                            "0",
+                        ],
+                    )
+            payload = json.loads(stdout)
+            output_dir = Path(payload["output_dir"])
+            extractions = json.loads((output_dir / "article_extractions.json").read_text(encoding="utf-8"))["article_fetch"]
+            scores = json.loads((output_dir / "sentiment_scores.json").read_text(encoding="utf-8"))["scores"]
+
+            self.assertEqual(payload["status"], "dry_run_complete")
+            self.assertEqual(extractions["attempted_fetches"], 1)
+            self.assertEqual(extractions["failed_extractions"], 1)
+            self.assertEqual(extractions["records"][0]["error_class"], "TimeoutError")
+            self.assertEqual(scores[0]["basis"], "snippet")
+
+    def test_report_includes_extraction_summary_and_sentiment_basis_counts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("news_pipeline.sources.live_rss.urlopen", return_value=FakeHttpResponse(LIVE_RSS_FIXTURE)):
+                with patch("news_pipeline.article_fetch.urlopen", return_value=FakeArticleResponse(ARTICLE_HTML)):
+                    stdout = _run_cli(
+                        "dry-run-daily",
+                        temp_dir,
+                        extra_args=[
+                            "--enable-live-rss",
+                            "--enable-live-article-fetch",
+                            "--live-rss-url",
+                            "https://example.com/rss/nvda.xml",
+                            "--live-rss-retries",
+                            "0",
+                        ],
+                    )
+            payload = json.loads(stdout)
+            output_dir = Path(payload["output_dir"])
+            contract = json.loads((output_dir / "report_contract.json").read_text(encoding="utf-8"))["report"]
+            markdown = (output_dir / "daily_report.md").read_text(encoding="utf-8")
+            html = (output_dir / "daily_report.html").read_text(encoding="utf-8")
+            email_html = (output_dir / "email_preview.html").read_text(encoding="utf-8")
+
+            self.assertEqual(contract["extraction_summary"]["article_pages_fetched"], 1)
+            self.assertEqual(contract["extraction_summary"]["successful_extractions"], 1)
+            self.assertEqual(contract["extraction_summary"]["sentiment_basis_counts"]["full_text"], 1)
+            self.assertIn("Article Extraction Summary", markdown)
+            self.assertIn("Article Extraction Summary", html)
+            self.assertIn("Article Extraction Summary", email_html)
+            self.assertIn("Extraction Basis", html)
+            self.assertIn("Extraction Basis", email_html)
+
 
 def _run_cli(
     command,
@@ -445,6 +629,7 @@ def _database_counts(database_path):
                 "provider_usage",
                 "provider_validation",
                 "dedupe_clusters",
+                "article_extractions",
                 "sentiment_results",
                 "ticker_mentions",
             )

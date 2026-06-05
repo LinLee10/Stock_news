@@ -8,6 +8,14 @@ import json
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
+from .article_fetch import (
+    DEFAULT_FETCH_TIMEOUT_SECONDS,
+    DEFAULT_MAX_ARTICLE_FETCHES,
+    DEFAULT_MAX_FETCHES_PER_TICKER,
+    ArticleFetchSummary,
+    disabled_article_fetch_summary,
+    fetch_top_cluster_articles,
+)
 from .dedup import cluster_articles
 from .email_preview import PreviewEmailSender
 from .models import Article, ArticleSource, RunResult, SentimentResult, TickerMention
@@ -21,6 +29,7 @@ from .reporting import (
     DailyReportContract,
     EmergingNameRow,
     EventClusterRow,
+    ExtractionSummary,
     MentionLeaderRow,
     MostMentionedRow,
     PortfolioSentimentRow,
@@ -73,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
             subparser.add_argument("--database-path")
         if command == "dry-run-daily":
             _add_live_rss_args(subparser)
+            _add_live_article_fetch_args(subparser)
             subparser.add_argument("--run-id")
 
     return parser
@@ -223,9 +233,16 @@ def main(
                 {**context, "providers": provider_results, "live_rss": live_rss_summary},
             )
             clusters = cluster_articles(articles)
-            persisted_article_ids = _persist_run_articles(store, run_id, articles)
-            canonical_articles = [cluster.canonical_article for cluster in clusters]
+            enriched_articles_by_url, article_fetch_summary = _run_article_fetch_stage(args, clusters)
+            articles_for_storage = [_enriched_article(article, enriched_articles_by_url) for article in articles]
+            canonical_articles = [
+                _enriched_article(cluster.canonical_article, enriched_articles_by_url)
+                for cluster in clusters
+            ]
+            persisted_article_ids = _persist_run_articles(store, run_id, articles_for_storage)
             scores = _score_articles(canonical_articles)
+            sentiment_basis_counts = _score_dict_basis_counts(scores)
+            _persist_article_extractions(store, run_id, article_fetch_summary, persisted_article_ids)
             _persist_dedupe_clusters(store, run_id, clusters, args.run_date)
             _persist_sentiment_and_mentions(store, run_id, canonical_articles)
 
@@ -246,8 +263,9 @@ def main(
         email_preview = PreviewEmailSender().write_preview(report)
         _write_json(
             output_dir / "collected_articles.json",
-            {**context, "article_count": len(articles), "articles": [_article_to_dict(article, args.run_date) for article in articles]},
+            {**context, "article_count": len(articles), "articles": [_article_to_dict(article, args.run_date) for article in articles_for_storage]},
         )
+        _write_json(output_dir / "article_extractions.json", {**context, "article_fetch": article_fetch_summary.as_dict()})
         _write_json(
             output_dir / "dedupe_clusters.json",
             {
@@ -268,6 +286,10 @@ def main(
             "article_count": len(articles),
             "cluster_count": len(clusters),
             "score_count": len(scores),
+            "article_pages_fetched": article_fetch_summary.attempted_fetches,
+            "successful_extractions": article_fetch_summary.successful_extractions,
+            "failed_extractions": article_fetch_summary.failed_extractions,
+            "sentiment_basis_counts": sentiment_basis_counts,
             "output_dir": report.output_dir,
             "html_preview_report": report.html_preview_report,
             "email_preview_html": email_preview.html_preview_path,
@@ -304,6 +326,13 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--live-rss-max-total-articles", type=int, default=DEFAULT_MAX_TOTAL_LIVE_ARTICLES)
 
 
+def _add_live_article_fetch_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--enable-live-article-fetch", action="store_true", default=False)
+    parser.add_argument("--max-article-fetches", type=int, default=DEFAULT_MAX_ARTICLE_FETCHES)
+    parser.add_argument("--max-fetches-per-ticker", type=int, default=DEFAULT_MAX_FETCHES_PER_TICKER)
+    parser.add_argument("--fetch-timeout-seconds", type=float, default=DEFAULT_FETCH_TIMEOUT_SECONDS)
+
+
 def _safe_context(args: argparse.Namespace) -> dict[str, object]:
     return {
         "command": args.command,
@@ -312,6 +341,7 @@ def _safe_context(args: argparse.Namespace) -> dict[str, object]:
         "paid_apis_enabled": args.enable_paid_apis,
         "email_send_enabled": args.enable_email_send,
         "live_rss_enabled": bool(getattr(args, "enable_live_rss", False)),
+        "live_article_fetch_enabled": bool(getattr(args, "enable_live_article_fetch", False)),
         "fixtures_included": bool(getattr(args, "include_fixtures", False)) or not bool(getattr(args, "enable_live_rss", False)),
         "output_dir": str(_run_output_dir(args.artifacts_dir, args.run_date)),
         "rss_fixtures_dir": args.rss_fixtures_dir,
@@ -434,6 +464,41 @@ def _collect_fixture_rss_articles(fixtures_dir: Path) -> list[Article]:
         source = RssSource(feed_xml, provider_name=f"fixture_rss_{fixture_path.stem}")
         articles.extend(source.articles())
     return articles
+
+
+def _run_article_fetch_stage(args: argparse.Namespace, clusters: Sequence[object]) -> tuple[dict[str, Article], ArticleFetchSummary]:
+    if not getattr(args, "enable_live_article_fetch", False):
+        return {}, disabled_article_fetch_summary(
+            reason="disabled",
+            max_article_fetches=args.max_article_fetches,
+            max_fetches_per_ticker=args.max_fetches_per_ticker,
+            fetch_timeout_seconds=args.fetch_timeout_seconds,
+        )
+    if not getattr(args, "enable_live_rss", False):
+        return {}, disabled_article_fetch_summary(
+            reason="live_rss_required",
+            max_article_fetches=args.max_article_fetches,
+            max_fetches_per_ticker=args.max_fetches_per_ticker,
+            fetch_timeout_seconds=args.fetch_timeout_seconds,
+        )
+    if not clusters:
+        return {}, disabled_article_fetch_summary(
+            reason="no_live_rss_clusters",
+            max_article_fetches=args.max_article_fetches,
+            max_fetches_per_ticker=args.max_fetches_per_ticker,
+            fetch_timeout_seconds=args.fetch_timeout_seconds,
+        )
+    return fetch_top_cluster_articles(
+        clusters,
+        run_date=args.run_date,
+        max_article_fetches=args.max_article_fetches,
+        max_fetches_per_ticker=args.max_fetches_per_ticker,
+        fetch_timeout_seconds=args.fetch_timeout_seconds,
+    )
+
+
+def _enriched_article(article: Article, enriched_articles_by_url: Mapping[str, Article]) -> Article:
+    return enriched_articles_by_url.get(article.canonical_url, article)
 
 
 def _canonical_articles(articles: list[Article]) -> list[Article]:
@@ -578,6 +643,8 @@ def _daily_report_input_from_store(store: SQLiteStore, run_id: str, run_date: st
         )
         for row in store.list_sentiment_results(run_id)
     }
+    sentiment_basis_counts = _sentiment_basis_counts(sentiments_by_article.values())
+    extractions_by_article = {str(row["article_id"]): row for row in store.list_article_extractions(run_id)}
     mentions_by_ticker: dict[str, list[dict[str, object]]] = {ticker.symbol: [] for ticker in load_tracked_tickers()}
     for mention in store.list_ticker_mentions(run_id):
         ticker = str(mention["ticker"])
@@ -594,7 +661,7 @@ def _daily_report_input_from_store(store: SQLiteStore, run_id: str, run_date: st
             }
         )
 
-    event_clusters_by_ticker = _event_clusters_by_ticker_from_store(store, run_id)
+    event_clusters_by_ticker = _event_clusters_by_ticker_from_store(store, run_id, extractions_by_article)
     article_links = _article_links_from_event_clusters(event_clusters_by_ticker)
     portfolio_rows = tuple(
         _sentiment_row_from_stored(ticker, mentions_by_ticker.get(ticker.symbol, ()), event_clusters_by_ticker.get(ticker.symbol, ()))
@@ -635,13 +702,29 @@ def _daily_report_input_from_store(store: SQLiteStore, run_id: str, run_date: st
         ),
         article_links_by_ticker=article_links,
         event_clusters_by_ticker=event_clusters_by_ticker,
+        extraction_summary=ExtractionSummary(
+            article_pages_fetched=sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0)),
+            successful_extractions=sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text"),
+            failed_extractions=(
+                sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0))
+                - sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text")
+            ),
+            sentiment_basis_counts=sentiment_basis_counts,
+        ),
     )
 
 
-def _event_clusters_by_ticker_from_store(store: SQLiteStore, run_id: str) -> dict[str, tuple[EventClusterRow, ...]]:
+def _event_clusters_by_ticker_from_store(
+    store: SQLiteStore,
+    run_id: str,
+    extractions_by_article: Mapping[str, Mapping[str, object]] | None = None,
+) -> dict[str, tuple[EventClusterRow, ...]]:
     grouped: dict[str, list[EventClusterRow]] = {ticker.symbol: [] for ticker in load_tracked_tickers()}
+    extractions_by_article = extractions_by_article or {}
     for row in store.list_dedupe_clusters(run_id):
         title = str(row["title"])
+        canonical_article_id = str(row.get("canonical_article_id") or "")
+        extraction = extractions_by_article.get(canonical_article_id, {})
         supporting_links = tuple(
             ArticleLink(
                 title=str(link.get("title") or title),
@@ -667,6 +750,7 @@ def _event_clusters_by_ticker_from_store(store: SQLiteStore, run_id: str) -> dic
                 if row.get("weighted_cluster_sentiment") is not None
                 else None
             ),
+            extraction_basis=str(extraction.get("extraction_basis") or "not_fetched"),
             supporting_links=supporting_links,
         )
         tickers = match_tickers(title)
@@ -687,6 +771,7 @@ def _event_clusters_by_ticker_from_store(store: SQLiteStore, run_id: str) -> dic
                     recency_bucket=event.recency_bucket,
                     tickers_mentioned=event.tickers_mentioned,
                     weighted_cluster_sentiment=event.weighted_cluster_sentiment,
+                    extraction_basis=event.extraction_basis,
                     supporting_links=event.supporting_links,
                 )
             )
@@ -856,6 +941,35 @@ def _persist_dedupe_clusters(store: SQLiteStore, run_id: str, clusters: Sequence
         )
 
 
+def _persist_article_extractions(
+    store: SQLiteStore,
+    run_id: str,
+    article_fetch_summary: ArticleFetchSummary,
+    article_ids_by_url: Mapping[str, str],
+) -> None:
+    for record in article_fetch_summary.records:
+        article_id = article_ids_by_url.get(record.canonical_url) or record.article_id
+        if not article_id:
+            continue
+        store.record_article_extraction(
+            run_id=run_id,
+            article_id=article_id,
+            canonical_url=record.canonical_url,
+            extraction_status=record.extraction_status,
+            extraction_basis=record.extraction_basis,
+            error_class=record.error_class,
+            final_url=record.final_url,
+            latency_ms=record.latency_ms,
+            content_type=record.content_type,
+            content_length=record.content_length,
+            text_hash=record.text_hash,
+            extracted_preview=record.extracted_preview,
+            extractor=record.extractor,
+            fetched=record.fetched,
+            tickers=record.tickers,
+        )
+
+
 def _persist_sentiment_and_mentions(store: SQLiteStore, run_id: str, articles: Sequence[Article]) -> None:
     ticker_lookup = {ticker.symbol: ticker for ticker in load_tracked_tickers()}
     for article in articles:
@@ -905,6 +1019,15 @@ def _score_articles(articles: Sequence[Article]) -> list[dict[str, object]]:
         )
         for article in articles
     ]
+
+
+def _score_dict_basis_counts(scores: Sequence[Mapping[str, object]]) -> dict[str, int]:
+    counts = {"full_text": 0, "snippet": 0, "title": 0}
+    for score in scores:
+        basis = str(score.get("basis") or "")
+        if basis in counts:
+            counts[basis] += 1
+    return counts
 
 
 def _article_text(article: Article) -> str:
@@ -970,6 +1093,14 @@ def _stored_sentiment_basis(items: Sequence[dict[str, object]]) -> str:
         if basis in bases:
             return basis
     return bases[0]
+
+
+def _sentiment_basis_counts(scores: Sequence[SentimentResult]) -> dict[str, int]:
+    counts = {"full_text": 0, "snippet": 0, "title": 0}
+    for score in scores:
+        if score.basis in counts:
+            counts[score.basis] += 1
+    return counts
 
 
 def _watchlist_forecast_row_from_stored(ticker: TrackedTicker, items: Sequence[dict[str, object]]) -> WatchlistForecastRow:
@@ -1086,6 +1217,12 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         "",
         report.daily_summary,
         "",
+        "## Article Extraction Summary",
+        "",
+        "| Article Pages Fetched | Successful Extractions | Failed Extractions | Full Text Basis | Snippet Basis | Title Basis |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: |",
+        _markdown_extraction_summary_row(report.extraction_summary),
+        "",
         *_markdown_recency_sections(report),
         "",
         "## Portfolio Recency Sentiment",
@@ -1183,13 +1320,13 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         lines.append(f"### {ticker}")
         lines.extend(
             [
-                "| Event | Bucket | Weighted Sentiment | First Seen | Latest Seen | Articles | Publishers | Sources |",
-                "| --- | --- | ---: | --- | --- | ---: | ---: | ---: |",
+                "| Event | Bucket | Weighted Sentiment | Extraction Basis | First Seen | Latest Seen | Articles | Publishers | Sources |",
+                "| --- | --- | ---: | --- | --- | --- | ---: | ---: | ---: |",
             ]
         )
         for cluster in visible_clusters:
             lines.append(
-                f"| [{_escape_markdown(cluster.title)}]({cluster.primary_link}) | {cluster.recency_bucket} | {_optional_markdown_score(cluster.weighted_cluster_sentiment)} | {cluster.first_seen_at or ''} | {cluster.latest_seen_at or ''} | {cluster.article_count} | {cluster.publisher_count} | {cluster.source_count} |"
+                f"| [{_escape_markdown(cluster.title)}]({cluster.primary_link}) | {cluster.recency_bucket} | {_optional_markdown_score(cluster.weighted_cluster_sentiment)} | {cluster.extraction_basis} | {cluster.first_seen_at or ''} | {cluster.latest_seen_at or ''} | {cluster.article_count} | {cluster.publisher_count} | {cluster.source_count} |"
             )
         lines.append("")
     if not event_written:
@@ -1216,6 +1353,14 @@ def _write_markdown_report(report: DailyReportContract) -> str:
 
 def _escape_markdown(value: str | None) -> str:
     return (value or "").replace("|", "\\|")
+
+
+def _markdown_extraction_summary_row(summary: ExtractionSummary) -> str:
+    basis_counts = {basis: int(summary.sentiment_basis_counts.get(basis, 0)) for basis in ("full_text", "snippet", "title")}
+    return (
+        f"| {summary.article_pages_fetched} | {summary.successful_extractions} | {summary.failed_extractions} | "
+        f"{basis_counts['full_text']} | {basis_counts['snippet']} | {basis_counts['title']} |"
+    )
 
 
 def _markdown_recency_sections(report: DailyReportContract) -> list[str]:

@@ -69,6 +69,7 @@ def _render_email_preview(
         "    <div class=\"note\"><strong>Data source:</strong> Local RSS fixture files by default, plus free live RSS only when explicitly enabled. Watchlist next-close directions use placeholder dry-run logic.</div>",
         "    <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic until a stronger model is wired in. This preview is not investment advice.</div>",
         f"    <div class=\"summary\">{escape(report.daily_summary)}</div>",
+        _extraction_summary(report),
         _recency_sections(report),
         _sentiment_table("Portfolio Recency Sentiment", report.portfolio_30d_sentiment_table),
         _sentiment_table("Watchlist Recency Sentiment", report.watchlist_sentiment_table),
@@ -113,6 +114,27 @@ def _sentiment_table(title: str, rows: tuple[object, ...]) -> str:
     )
     body.append("    </table>")
     return "\n".join(body)
+
+
+def _extraction_summary(report: DailyReportContract) -> str:
+    summary = report.extraction_summary
+    basis_counts = {basis: int(summary.sentiment_basis_counts.get(basis, 0)) for basis in ("full_text", "snippet", "title")}
+    return "\n".join(
+        [
+            "    <h2>Article Extraction Summary</h2>",
+            "    <table>",
+            "      <tr><th>Article Pages Fetched</th><th>Successful Extractions</th><th>Failed Extractions</th><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th></tr>",
+            "      <tr>"
+            f"<td class=\"num\">{summary.article_pages_fetched}</td>"
+            f"<td class=\"num\">{summary.successful_extractions}</td>"
+            f"<td class=\"num\">{summary.failed_extractions}</td>"
+            f"<td class=\"num\">{basis_counts['full_text']}</td>"
+            f"<td class=\"num\">{basis_counts['snippet']}</td>"
+            f"<td class=\"num\">{basis_counts['title']}</td>"
+            "</tr>",
+            "    </table>",
+        ]
+    )
 
 
 def _recency_sections(report: DailyReportContract) -> str:
@@ -269,13 +291,14 @@ def _event_clusters(report: DailyReportContract) -> str:
         shown = True
         body.append(f"    <h3>{escape(ticker)}</h3>")
         body.append("    <table>")
-        body.append("      <tr><th>Event</th><th>Bucket</th><th>Sentiment</th><th>Articles</th><th>Publishers</th><th>Sources</th></tr>")
+        body.append("      <tr><th>Event</th><th>Bucket</th><th>Sentiment</th><th>Extraction Basis</th><th>Articles</th><th>Publishers</th><th>Sources</th></tr>")
         for cluster in visible_clusters:
             body.append(
                 "      <tr>"
                 f"<td><a href=\"{escape(cluster.primary_link, quote=True)}\">{escape(cluster.title)}</a></td>"
                 f"<td>{escape(cluster.recency_bucket)}</td>"
                 f"<td class=\"num\">{_format_optional_score(cluster.weighted_cluster_sentiment)}</td>"
+                f"<td>{escape(cluster.extraction_basis)}</td>"
                 f"<td class=\"num\">{cluster.article_count}</td>"
                 f"<td class=\"num\">{cluster.publisher_count}</td>"
                 f"<td class=\"num\">{cluster.source_count}</td>"
