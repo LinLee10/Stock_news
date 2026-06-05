@@ -123,18 +123,52 @@ def _extraction_summary(report: DailyReportContract) -> str:
         [
             "    <h2>Article Extraction Summary</h2>",
             "    <table>",
-            "      <tr><th>Article Pages Fetched</th><th>Successful Extractions</th><th>Failed Extractions</th><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th></tr>",
+            "      <tr><th>Article Fetch Attempts</th><th>Publisher Article Fetches</th><th>Google Wrappers Skipped</th><th>Google Wrappers Resolved</th><th>Full Text Successes</th><th>Snippet Fallbacks</th><th>Title Fallbacks</th></tr>",
             "      <tr>"
             f"<td class=\"num\">{summary.article_pages_fetched}</td>"
+            f"<td class=\"num\">{summary.publisher_article_fetches}</td>"
+            f"<td class=\"num\">{summary.google_news_wrappers_skipped}</td>"
+            f"<td class=\"num\">{summary.google_news_wrappers_resolved}</td>"
             f"<td class=\"num\">{summary.successful_extractions}</td>"
-            f"<td class=\"num\">{summary.failed_extractions}</td>"
+            f"<td class=\"num\">{summary.snippet_fallbacks}</td>"
+            f"<td class=\"num\">{summary.title_fallbacks}</td>"
+            "</tr>",
+            "    </table>",
+            "    <table>",
+            "      <tr><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th><th>Trafilatura</th><th>Newspaper3k</th><th>Internal Parser</th></tr>",
+            "      <tr>"
             f"<td class=\"num\">{basis_counts['full_text']}</td>"
             f"<td class=\"num\">{basis_counts['snippet']}</td>"
             f"<td class=\"num\">{basis_counts['title']}</td>"
+            f"<td>{escape(_availability(summary.extractor_diagnostics.get('trafilatura_available')))}</td>"
+            f"<td>{escape(_availability(summary.extractor_diagnostics.get('newspaper3k_available')))}</td>"
+            f"<td>{escape(_availability(summary.extractor_diagnostics.get('internal_parser_available')))}</td>"
             "</tr>",
             "    </table>",
+            _failure_reasons(summary.top_extraction_failure_reasons),
         ]
     )
+
+
+def _failure_reasons(reasons) -> str:
+    if not reasons:
+        return "    <p class=\"empty\">No extraction failure reasons recorded.</p>"
+    rows = sorted(reasons.items(), key=lambda item: (-int(item[1]), item[0]))[:8]
+    body = [
+        "    <h3>Top Extraction Failure Reasons</h3>",
+        "    <table>",
+        "      <tr><th>Reason</th><th>Count</th></tr>",
+    ]
+    body.extend(
+        f"      <tr><td>{escape(reason)}</td><td class=\"num\">{int(count)}</td></tr>"
+        for reason, count in rows
+    )
+    body.append("    </table>")
+    return "\n".join(body)
+
+
+def _availability(value) -> str:
+    return "available" if value else "missing"
 
 
 def _recency_sections(report: DailyReportContract) -> str:

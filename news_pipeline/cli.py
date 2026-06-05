@@ -256,7 +256,10 @@ def main(
                 ),
                 run_date=args.run_date,
             )
-            report = build_daily_report(_daily_report_input_from_store(store, run_id, args.run_date), artifacts_dir=args.artifacts_dir)
+            report = build_daily_report(
+                _daily_report_input_from_store(store, run_id, args.run_date, article_fetch_summary),
+                artifacts_dir=args.artifacts_dir,
+            )
         finally:
             store.close()
         markdown_report = _write_markdown_report(report)
@@ -287,8 +290,14 @@ def main(
             "cluster_count": len(clusters),
             "score_count": len(scores),
             "article_pages_fetched": article_fetch_summary.attempted_fetches,
+            "publisher_article_fetches": article_fetch_summary.publisher_article_fetches,
+            "google_news_wrappers_skipped": article_fetch_summary.google_news_wrappers_skipped,
+            "google_news_wrappers_resolved": article_fetch_summary.google_news_wrappers_resolved,
             "successful_extractions": article_fetch_summary.successful_extractions,
             "failed_extractions": article_fetch_summary.failed_extractions,
+            "snippet_fallbacks": article_fetch_summary.snippet_fallbacks,
+            "title_fallbacks": article_fetch_summary.title_fallbacks,
+            "top_extraction_failure_reasons": article_fetch_summary.failure_reason_counts,
             "sentiment_basis_counts": sentiment_basis_counts,
             "output_dir": report.output_dir,
             "html_preview_report": report.html_preview_report,
@@ -625,7 +634,12 @@ def _daily_report_input(run_date: str, articles: Sequence[Article]) -> DailyRepo
     )
 
 
-def _daily_report_input_from_store(store: SQLiteStore, run_id: str, run_date: str) -> DailyReportInput:
+def _daily_report_input_from_store(
+    store: SQLiteStore,
+    run_id: str,
+    run_date: str,
+    article_fetch_summary: ArticleFetchSummary | None = None,
+) -> DailyReportInput:
     articles_by_id = {str(row["article_id"]): row for row in store.list_run_articles(run_id)}
     sources_by_article: dict[str, dict[str, object]] = {}
     for source in store.list_article_sources(run_id):
@@ -702,14 +716,10 @@ def _daily_report_input_from_store(store: SQLiteStore, run_id: str, run_date: st
         ),
         article_links_by_ticker=article_links,
         event_clusters_by_ticker=event_clusters_by_ticker,
-        extraction_summary=ExtractionSummary(
-            article_pages_fetched=sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0)),
-            successful_extractions=sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text"),
-            failed_extractions=(
-                sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0))
-                - sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text")
-            ),
-            sentiment_basis_counts=sentiment_basis_counts,
+        extraction_summary=_extraction_summary_from_fetch_summary(
+            article_fetch_summary,
+            extractions_by_article,
+            sentiment_basis_counts,
         ),
     )
 
@@ -791,6 +801,38 @@ def _article_links_from_event_clusters(
             links.append(ArticleLink(event.title, event.primary_link, f"{event.publisher_count} publisher(s)"))
         links_by_ticker[ticker.symbol] = tuple(links)
     return links_by_ticker
+
+
+def _extraction_summary_from_fetch_summary(
+    article_fetch_summary: ArticleFetchSummary | None,
+    extractions_by_article: Mapping[str, Mapping[str, object]],
+    sentiment_basis_counts: Mapping[str, int],
+) -> ExtractionSummary:
+    if article_fetch_summary is not None:
+        return ExtractionSummary(
+            article_pages_fetched=article_fetch_summary.attempted_fetches,
+            publisher_article_fetches=article_fetch_summary.publisher_article_fetches,
+            google_news_wrappers_skipped=article_fetch_summary.google_news_wrappers_skipped,
+            google_news_wrappers_resolved=article_fetch_summary.google_news_wrappers_resolved,
+            successful_extractions=article_fetch_summary.successful_extractions,
+            failed_extractions=article_fetch_summary.failed_extractions,
+            snippet_fallbacks=article_fetch_summary.snippet_fallbacks,
+            title_fallbacks=article_fetch_summary.title_fallbacks,
+            sentiment_basis_counts=sentiment_basis_counts,
+            top_extraction_failure_reasons=article_fetch_summary.failure_reason_counts,
+            extractor_diagnostics=article_fetch_summary.extractor_diagnostics or {},
+        )
+    fetched_count = sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0))
+    success_count = sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text")
+    return ExtractionSummary(
+        article_pages_fetched=fetched_count,
+        publisher_article_fetches=fetched_count,
+        successful_extractions=success_count,
+        failed_extractions=fetched_count - success_count,
+        snippet_fallbacks=sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "snippet"),
+        title_fallbacks=sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "title"),
+        sentiment_basis_counts=sentiment_basis_counts,
+    )
 
 
 def _sentiment_row_from_stored(
@@ -1219,9 +1261,15 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         "",
         "## Article Extraction Summary",
         "",
-        "| Article Pages Fetched | Successful Extractions | Failed Extractions | Full Text Basis | Snippet Basis | Title Basis |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Article Fetch Attempts | Publisher Article Fetches | Google Wrappers Skipped | Google Wrappers Resolved | Full Text Successes | Snippet Fallbacks | Title Fallbacks |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         _markdown_extraction_summary_row(report.extraction_summary),
+        "",
+        "| Full Text Basis | Snippet Basis | Title Basis | Trafilatura | Newspaper3k | Internal Parser |",
+        "| ---: | ---: | ---: | --- | --- | --- |",
+        _markdown_extractor_status_row(report.extraction_summary),
+        "",
+        *_markdown_failure_reason_rows(report.extraction_summary),
         "",
         *_markdown_recency_sections(report),
         "",
@@ -1356,11 +1404,46 @@ def _escape_markdown(value: str | None) -> str:
 
 
 def _markdown_extraction_summary_row(summary: ExtractionSummary) -> str:
-    basis_counts = {basis: int(summary.sentiment_basis_counts.get(basis, 0)) for basis in ("full_text", "snippet", "title")}
     return (
-        f"| {summary.article_pages_fetched} | {summary.successful_extractions} | {summary.failed_extractions} | "
-        f"{basis_counts['full_text']} | {basis_counts['snippet']} | {basis_counts['title']} |"
+        f"| {summary.article_pages_fetched} | {summary.publisher_article_fetches} | "
+        f"{summary.google_news_wrappers_skipped} | {summary.google_news_wrappers_resolved} | "
+        f"{summary.successful_extractions} | {summary.snippet_fallbacks} | {summary.title_fallbacks} |"
     )
+
+
+def _markdown_extractor_status_row(summary: ExtractionSummary) -> str:
+    basis_counts = {basis: int(summary.sentiment_basis_counts.get(basis, 0)) for basis in ("full_text", "snippet", "title")}
+    diagnostics = summary.extractor_diagnostics
+    return (
+        f"| {basis_counts['full_text']} | {basis_counts['snippet']} | {basis_counts['title']} | "
+        f"{_availability(diagnostics.get('trafilatura_available'))} | "
+        f"{_availability(diagnostics.get('newspaper3k_available'))} | "
+        f"{_availability(diagnostics.get('internal_parser_available'))} |"
+    )
+
+
+def _markdown_failure_reason_rows(summary: ExtractionSummary) -> list[str]:
+    lines = [
+        "### Top Extraction Failure Reasons",
+        "",
+        "| Reason | Count |",
+        "| --- | ---: |",
+    ]
+    if not summary.top_extraction_failure_reasons:
+        lines.append("| none | 0 |")
+        return lines
+    lines.extend(
+        f"| {_escape_markdown(reason)} | {int(count)} |"
+        for reason, count in sorted(
+            summary.top_extraction_failure_reasons.items(),
+            key=lambda item: (-int(item[1]), item[0]),
+        )[:8]
+    )
+    return lines
+
+
+def _availability(value: bool | None) -> str:
+    return "available" if value else "missing"
 
 
 def _markdown_recency_sections(report: DailyReportContract) -> list[str]:

@@ -22,9 +22,20 @@ class ArticleLink:
 @dataclass(frozen=True)
 class ExtractionSummary:
     article_pages_fetched: int = 0
+    publisher_article_fetches: int = 0
+    google_news_wrappers_skipped: int = 0
+    google_news_wrappers_resolved: int = 0
     successful_extractions: int = 0
     failed_extractions: int = 0
+    snippet_fallbacks: int = 0
+    title_fallbacks: int = 0
     sentiment_basis_counts: Mapping[str, int] = field(default_factory=lambda: {"full_text": 0, "snippet": 0, "title": 0})
+    top_extraction_failure_reasons: Mapping[str, int] = field(default_factory=dict)
+    extractor_diagnostics: Mapping[str, bool] = field(default_factory=lambda: {
+        "trafilatura_available": False,
+        "newspaper3k_available": False,
+        "internal_parser_available": True,
+    })
 
 
 @dataclass(frozen=True)
@@ -427,18 +438,52 @@ def _extraction_summary_html(summary: ExtractionSummary) -> str:
         [
             "  <h2>Article Extraction Summary</h2>",
             "  <table>",
-            "    <tr><th>Article Pages Fetched</th><th>Successful Extractions</th><th>Failed Extractions</th><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th></tr>",
+            "    <tr><th>Article Fetch Attempts</th><th>Publisher Article Fetches</th><th>Google Wrappers Skipped</th><th>Google Wrappers Resolved</th><th>Full Text Successes</th><th>Snippet Fallbacks</th><th>Title Fallbacks</th></tr>",
             "    <tr>"
             f"<td class=\"num\">{summary.article_pages_fetched}</td>"
+            f"<td class=\"num\">{summary.publisher_article_fetches}</td>"
+            f"<td class=\"num\">{summary.google_news_wrappers_skipped}</td>"
+            f"<td class=\"num\">{summary.google_news_wrappers_resolved}</td>"
             f"<td class=\"num\">{summary.successful_extractions}</td>"
-            f"<td class=\"num\">{summary.failed_extractions}</td>"
+            f"<td class=\"num\">{summary.snippet_fallbacks}</td>"
+            f"<td class=\"num\">{summary.title_fallbacks}</td>"
+            "</tr>",
+            "  </table>",
+            "  <table>",
+            "    <tr><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th><th>Trafilatura</th><th>Newspaper3k</th><th>Internal Parser</th></tr>",
+            "    <tr>"
             f"<td class=\"num\">{basis_counts['full_text']}</td>"
             f"<td class=\"num\">{basis_counts['snippet']}</td>"
             f"<td class=\"num\">{basis_counts['title']}</td>"
+            f"<td>{escape(_availability(summary.extractor_diagnostics.get('trafilatura_available')))}</td>"
+            f"<td>{escape(_availability(summary.extractor_diagnostics.get('newspaper3k_available')))}</td>"
+            f"<td>{escape(_availability(summary.extractor_diagnostics.get('internal_parser_available')))}</td>"
             "</tr>",
             "  </table>",
+            _failure_reasons_html(summary.top_extraction_failure_reasons),
         ]
     )
+
+
+def _failure_reasons_html(reasons: Mapping[str, int]) -> str:
+    if not reasons:
+        return "  <p class=\"empty\">No extraction failure reasons recorded.</p>"
+    rows = sorted(reasons.items(), key=lambda item: (-int(item[1]), item[0]))[:8]
+    body = [
+        "  <h3>Top Extraction Failure Reasons</h3>",
+        "  <table>",
+        "    <tr><th>Reason</th><th>Count</th></tr>",
+    ]
+    body.extend(
+        f"    <tr><td>{escape(reason)}</td><td class=\"num\">{int(count)}</td></tr>"
+        for reason, count in rows
+    )
+    body.append("  </table>")
+    return "\n".join(body)
+
+
+def _availability(value: bool | None) -> str:
+    return "available" if value else "missing"
 
 
 def _recency_bucket_html(

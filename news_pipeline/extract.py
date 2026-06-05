@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html.parser import HTMLParser
+import importlib.util
 import json
 from typing import Any
 
@@ -45,6 +46,9 @@ def extract_article(
 ) -> ExtractionResult:
     """Extract article fields from provided HTML without fetching a URL."""
     errors: list[str] = []
+    dependency_status = extraction_dependency_status()
+    if not dependency_status["trafilatura_available"] or not dependency_status["newspaper3k_available"]:
+        errors.append("optional_extractors_unavailable")
 
     for extractor_name, extractor in (
         ("trafilatura", _extract_with_trafilatura),
@@ -64,6 +68,7 @@ def extract_article(
     if parsed.main_text.strip():
         return parsed
 
+    errors.append("no_article_body")
     fallback = choose_extraction_basis(full_text=None, snippet=snippet, title=title or parsed.title)
     if fallback.extraction_basis == "failed":
         return ExtractionResult(
@@ -73,7 +78,7 @@ def extract_article(
             author=parsed.author,
             extraction_status="failed",
             extraction_basis="failed",
-            extraction_error="; ".join(errors) or "no_extractable_text",
+            extraction_error="; ".join(_unique(errors)) or "no_extractable_text",
             extractor="fallback",
             url=url,
         )
@@ -85,10 +90,19 @@ def extract_article(
         author=parsed.author,
         extraction_status="fallback",
         extraction_basis=fallback.extraction_basis,
-        extraction_error="; ".join(errors) or None,
+        extraction_error="; ".join(_unique(errors)) or None,
         extractor="fallback",
         url=url,
     )
+
+
+def extraction_dependency_status() -> dict[str, bool]:
+    """Return optional extractor availability without importing secrets or fetching."""
+    return {
+        "trafilatura_available": importlib.util.find_spec("trafilatura") is not None,
+        "newspaper3k_available": _newspaper3k_available(),
+        "internal_parser_available": True,
+    }
 
 
 def choose_extraction_basis(
@@ -272,3 +286,24 @@ class _ArticleHTMLParser(HTMLParser):
 
 def _collapse_ws(value: str) -> str:
     return " ".join(value.split())
+
+
+def _newspaper3k_available() -> bool:
+    if importlib.util.find_spec("newspaper") is None:
+        return False
+    try:
+        from newspaper import Article as _NewspaperArticle  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _unique(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique_values: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        unique_values.append(value)
+        seen.add(value)
+    return unique_values
