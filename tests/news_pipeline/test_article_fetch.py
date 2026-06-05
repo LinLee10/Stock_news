@@ -74,6 +74,17 @@ class ArticleFetchTests(unittest.TestCase):
         self.assertEqual(urlopen.call_args.args[0].full_url, "https://finance.yahoo.com/news/nvidia")
         self.assertIn(google.canonical_url, enriched)
 
+    def test_higher_quality_direct_publisher_url_is_prioritized_for_fetch(self):
+        low_priority = _article("https://stocktwits.com/nvda-noise", "NVIDIA Stocktwits", provider="stocktwits", source="Stocktwits")
+        high_quality = _article("https://www.marketwatch.com/story/nvda-quality", "NVIDIA MarketWatch", provider="marketwatch_rss", source="MarketWatch")
+        cluster = _cluster(low_priority, (low_priority, high_quality))
+
+        with patch("news_pipeline.article_fetch.urlopen", return_value=_html_response(high_quality.canonical_url)) as urlopen:
+            _enriched, summary = fetch_top_cluster_articles((cluster,), run_date="2026-06-04")
+
+        self.assertEqual(summary.attempted_fetches, 1)
+        self.assertEqual(urlopen.call_args.args[0].full_url, high_quality.canonical_url)
+
     def test_unresolved_google_wrapper_does_not_consume_fetch_budget_when_direct_url_is_available(self):
         google = _article("https://news.google.com/rss/articles/google", "NVIDIA wrapper")
         direct = _article("https://www.cnbc.com/nvidia", "NVIDIA publisher", provider="cnbc_rss", source="CNBC")

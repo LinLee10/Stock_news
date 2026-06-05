@@ -60,15 +60,17 @@ def _render_email_preview(
         "    .summary{background:#edf7f1;border-left:4px solid #248a4b;padding:12px;margin:12px 0 20px}",
         "    .num{text-align:right}",
         "    .empty{color:#64748b}",
+        "    .muted{color:#64748b;font-size:13px}",
         "  </style>",
         "</head>",
         "<body>",
         "  <div class=\"wrap\">",
         f"    <h1>{escape(subject)}</h1>",
         "    <div class=\"note\"><strong>Preview only:</strong> This file is a local email preview. No SMTP, Gmail, Resend, or other live email provider was contacted.</div>",
-        "    <div class=\"note\"><strong>Data source:</strong> Local RSS fixture files by default, plus free live RSS only when explicitly enabled. Watchlist next-close directions use placeholder dry-run logic.</div>",
-        "    <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic until a stronger model is wired in. This preview is not investment advice.</div>",
+        f"    <div class=\"note\"><strong>Data source:</strong> {escape(report.data_source_label)}. No paid APIs were called.</div>",
+        "    <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic, and watchlist direction rows are not real predictions. This preview is not investment advice.</div>",
         f"    <div class=\"summary\">{escape(report.daily_summary)}</div>",
+        _source_quality_summary(report),
         _extraction_summary(report),
         _recency_sections(report),
         _sentiment_table("Portfolio Recency Sentiment", report.portfolio_30d_sentiment_table),
@@ -142,10 +144,41 @@ def _extraction_summary(report: DailyReportContract) -> str:
             f"<td class=\"num\">{basis_counts['title']}</td>"
             "</tr>",
             "    </table>",
-            _extraction_diagnostics(summary),
             _failure_reasons(summary.top_extraction_failure_reasons),
+            _extraction_diagnostics(summary),
         ]
     )
+
+
+def _source_quality_summary(report: DailyReportContract) -> str:
+    summary = report.extraction_summary.source_quality_summary
+    tier_counts = summary.visible_tier_counts or summary.tier_counts
+    return "\n".join(
+        [
+            "    <h2>Source Quality Summary</h2>",
+            "    <table>",
+            "      <tr><th>Total Articles</th><th>Visible Articles</th><th>Excluded Articles</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3 Visible</th><th>Tier 4 Excluded</th></tr>",
+            "      <tr>"
+            f"<td class=\"num\">{summary.total_articles}</td>"
+            f"<td class=\"num\">{summary.visible_articles}</td>"
+            f"<td class=\"num\">{summary.excluded_articles}</td>"
+            f"<td class=\"num\">{int(tier_counts.get('tier_1_high_trust', 0))}</td>"
+            f"<td class=\"num\">{int(tier_counts.get('tier_2_usable', 0))}</td>"
+            f"<td class=\"num\">{summary.low_priority_visible_articles}</td>"
+            f"<td class=\"num\">{int(summary.excluded_tier_counts.get('tier_4_exclude_by_default', 0))}</td>"
+            "</tr>",
+            "    </table>",
+            _excluded_sources(summary),
+        ]
+    )
+
+
+def _excluded_sources(summary) -> str:
+    if not summary.excluded_sources:
+        return "    <p class=\"muted\">No low-quality sources were excluded.</p>"
+    sources = ", ".join(summary.excluded_sources[:8])
+    suffix = f" and {len(summary.excluded_sources) - 8} more" if len(summary.excluded_sources) > 8 else ""
+    return f"    <p class=\"muted\">Excluded or hidden low-quality sources: {escape(sources + suffix)}.</p>"
 
 
 def _extraction_diagnostics(summary) -> str:
@@ -235,7 +268,7 @@ def _recency_bucket(title, description, rows, sentiment_field, count_field):
 def _forecast_table(report: DailyReportContract) -> str:
     body = [
         "    <h2>Watchlist Next Close Direction</h2>",
-        "    <p class=\"note\">Placeholder forecast logic: direction is derived from fixture sentiment only. This is not a live model prediction.</p>",
+        "    <p class=\"note\">Placeholder direction logic: direction is derived from current report sentiment. These rows are not real predictions.</p>",
         "    <table>",
         "      <tr><th>Ticker</th><th>Direction</th><th>Confidence</th><th>Driver</th></tr>",
     ]
@@ -268,7 +301,7 @@ def _mention_leaders_table(report: DailyReportContract) -> str:
             for row in report.mention_leaders_7d_table
         )
     else:
-        body.append("      <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in fixture data.</td></tr>")
+        body.append("      <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in current report data.</td></tr>")
     body.append("    </table>")
     return "\n".join(body)
 
@@ -289,7 +322,7 @@ def _top_mentions_table(report: DailyReportContract) -> str:
             for row in report.top_10_most_mentioned_table
         )
     else:
-        body.append("      <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in fixture data.</td></tr>")
+        body.append("      <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in current report data.</td></tr>")
     body.append("    </table>")
     return "\n".join(body)
 
@@ -312,7 +345,7 @@ def _emerging_names_table(report: DailyReportContract) -> str:
             for row in report.emerging_names_table
         )
     else:
-        body.append("      <tr><td colspan=\"5\" class=\"empty\">No emerging watchlist names were found in fixture data.</td></tr>")
+        body.append("      <tr><td colspan=\"5\" class=\"empty\">No emerging watchlist names were found in current report data.</td></tr>")
     body.append("    </table>")
     return "\n".join(body)
 
@@ -334,7 +367,7 @@ def _article_links(report: DailyReportContract) -> str:
             body.append(f"      <li class=\"empty\">+{len(links) - len(visible_links)} more links in JSON artifacts</li>")
         body.append("    </ul>")
     if not linked:
-        body.append("    <p class=\"empty\">No fixture article links matched configured tickers.</p>")
+        body.append("    <p class=\"empty\">No article links matched configured tickers.</p>")
     return "\n".join(body)
 
 
@@ -342,7 +375,7 @@ def _event_clusters(report: DailyReportContract) -> str:
     body = ["    <h2>Top Event Clusters By Recency And Source Diversity</h2>"]
     shown = False
     for ticker, clusters in sorted(report.event_clusters_by_ticker.items()):
-        visible_clusters = clusters[:5]
+        visible_clusters = sorted(clusters, key=lambda cluster: (cluster.source_quality_label, cluster.title))[:5]
         if not visible_clusters:
             continue
         shown = True

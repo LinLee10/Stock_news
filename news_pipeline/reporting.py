@@ -10,6 +10,7 @@ from typing import Iterable, Mapping
 
 from .charts import write_placeholder_chart
 from .models import RunResult
+from .source_quality import SourceQualitySummary
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class ArticleLink:
     title: str
     url: str
     source: str | None = None
+    source_quality_label: str = "tier_2_usable"
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,8 @@ class ExtractionSummary:
         "newspaper3k_available": False,
         "internal_parser_available": True,
     })
+    source_quality_summary: SourceQualitySummary = field(default_factory=SourceQualitySummary)
+    show_excluded_source_diagnostics: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,7 @@ class EventClusterRow:
     tickers_mentioned: tuple[str, ...] = ()
     weighted_cluster_sentiment: float | None = None
     extraction_basis: str = "not_fetched"
+    source_quality_label: str = "tier_2_usable"
     supporting_links: tuple[ArticleLink, ...] = ()
 
 
@@ -121,6 +126,7 @@ class DailyReportInput:
     article_links_by_ticker: Mapping[str, tuple[ArticleLink, ...]] = field(default_factory=dict)
     event_clusters_by_ticker: Mapping[str, tuple[EventClusterRow, ...]] = field(default_factory=dict)
     extraction_summary: ExtractionSummary = field(default_factory=ExtractionSummary)
+    data_source_label: str = "local RSS fixtures"
 
 
 @dataclass(frozen=True)
@@ -142,6 +148,7 @@ class DailyReportContract:
     chart_attachments: tuple[str, ...]
     html_preview_report: str
     daily_summary: str
+    data_source_label: str
 
 
 def summarize_run(run: RunResult) -> dict[str, object]:
@@ -237,6 +244,7 @@ def build_daily_report(
         chart_attachments=chart_attachments,
         html_preview_report=html_preview_report,
         daily_summary=_plain_english_summary(report_input, top_10),
+        data_source_label=report_input.data_source_label,
     )
 
 
@@ -315,6 +323,7 @@ def _top_event_clusters(
         sorted(
             clusters,
             key=lambda cluster: (
+                _quality_rank(cluster.source_quality_label),
                 bucket_rank.get(cluster.recency_bucket, 0),
                 cluster.source_count,
                 cluster.publisher_count,
@@ -337,9 +346,9 @@ def _plain_english_summary(
     emerging = ", ".join(row.ticker for row in report_input.emerging_names[:3]) or "none"
     return (
         f"Daily report for {report_input.report_date}: "
-        f"{matched_portfolio_count} of {portfolio_count} portfolio names have fixture sentiment coverage, "
-        f"{matched_watchlist_count} of {len(report_input.watchlist_sentiment)} watchlist names have fixture sentiment coverage, "
-        f"{watchlist_count} watchlist names have placeholder next close direction rows, "
+        f"{matched_portfolio_count} of {portfolio_count} portfolio names have configured ticker coverage, "
+        f"{matched_watchlist_count} of {len(report_input.watchlist_sentiment)} watchlist names have configured ticker coverage, "
+        f"{watchlist_count} watchlist names have placeholder direction rows from current report sentiment, "
         f"top mention leaders are {top_mentions}, and emerging names are {emerging}."
     )
 
@@ -366,13 +375,14 @@ def _write_html_preview(
         "    .note{background:#fff8e6;border-left:4px solid #c98900;padding:12px;margin:12px 0 20px}",
         "    .summary{background:#edf7f1;border-left:4px solid #248a4b;padding:12px;margin:12px 0 20px}",
         "    .empty{color:#64748b}",
+        "    .muted{color:#64748b;font-size:13px}",
         "    .num{text-align:right}",
         "  </style>",
         "</head>",
         "<body>",
         f"  <h1>News Pipeline Dry Run - {escape(report_input.report_date)}</h1>",
-        "  <div class=\"note\"><strong>Data source:</strong> Local RSS fixture files by default, plus free live RSS only when explicitly enabled. No paid APIs were called, no email was sent, and watchlist next-close directions use placeholder dry-run logic.</div>",
-        "  <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic until a stronger model is wired in. This report is not investment advice.</div>",
+        f"  <div class=\"note\"><strong>Data source:</strong> {escape(report_input.data_source_label)}. No paid APIs were called and no email was sent.</div>",
+        "  <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic, and watchlist direction rows are not real predictions. This report is not investment advice.</div>",
         f"  <div class=\"summary\">{escape(_plain_english_summary(report_input, top_10))}</div>",
         "  <h2>Plain English Readout</h2>",
         "  <ul>",
@@ -381,6 +391,7 @@ def _write_html_preview(
         f"    <li>{escape(_attention_sentence(report_input))}</li>",
         "    <li>All sentiment basis labels are shown as full_text, snippet, title, or no_articles.</li>",
         "  </ul>",
+        _source_quality_summary_html(report_input.extraction_summary.source_quality_summary),
         _extraction_summary_html(report_input.extraction_summary),
         _recency_sections_html(report_input),
         _sentiment_table_html("Portfolio Recency Sentiment", report_input.portfolio_sentiment),
@@ -459,10 +470,40 @@ def _extraction_summary_html(summary: ExtractionSummary) -> str:
             f"<td class=\"num\">{basis_counts['title']}</td>"
             "</tr>",
             "  </table>",
-            _extraction_diagnostics_html(summary),
             _failure_reasons_html(summary.top_extraction_failure_reasons),
+            _extraction_diagnostics_html(summary),
         ]
     )
+
+
+def _source_quality_summary_html(summary: SourceQualitySummary) -> str:
+    tier_counts = summary.visible_tier_counts or summary.tier_counts
+    return "\n".join(
+        [
+            "  <h2>Source Quality Summary</h2>",
+            "  <table>",
+            "    <tr><th>Total Articles</th><th>Visible Articles</th><th>Excluded Articles</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3 Visible</th><th>Tier 4 Excluded</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{summary.total_articles}</td>"
+            f"<td class=\"num\">{summary.visible_articles}</td>"
+            f"<td class=\"num\">{summary.excluded_articles}</td>"
+            f"<td class=\"num\">{int(tier_counts.get('tier_1_high_trust', 0))}</td>"
+            f"<td class=\"num\">{int(tier_counts.get('tier_2_usable', 0))}</td>"
+            f"<td class=\"num\">{summary.low_priority_visible_articles}</td>"
+            f"<td class=\"num\">{int(summary.excluded_tier_counts.get('tier_4_exclude_by_default', 0))}</td>"
+            "</tr>",
+            "  </table>",
+            _excluded_sources_html(summary),
+        ]
+    )
+
+
+def _excluded_sources_html(summary: SourceQualitySummary) -> str:
+    if not summary.excluded_sources:
+        return "  <p class=\"muted\">No low-quality sources were excluded.</p>"
+    sources = ", ".join(summary.excluded_sources[:8])
+    suffix = f" and {len(summary.excluded_sources) - 8} more" if len(summary.excluded_sources) > 8 else ""
+    return f"  <p class=\"muted\">Excluded or hidden low-quality sources: {escape(sources + suffix)}.</p>"
 
 
 def _extraction_diagnostics_html(summary: ExtractionSummary) -> str:
@@ -578,7 +619,7 @@ def _sentiment_table_html(title: str, rows: tuple[PortfolioSentimentRow, ...]) -
 def _forecast_table_html(rows: tuple[WatchlistForecastRow, ...]) -> str:
     body = [
         "  <h2>Watchlist Next Close Direction</h2>",
-        "  <p class=\"note\">Placeholder forecast logic: direction is derived from fixture sentiment only. This is not a live model prediction.</p>",
+        "  <p class=\"note\">Placeholder direction logic: direction is derived from current report sentiment. These rows are not real predictions.</p>",
         "  <table>",
         "    <tr><th>Ticker</th><th>Direction</th><th>Confidence</th><th>Driver</th></tr>",
     ]
@@ -611,7 +652,7 @@ def _mention_leaders_html(rows: tuple[MentionLeaderRow, ...]) -> str:
             for row in rows
         )
     else:
-        body.append("    <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in fixture data.</td></tr>")
+        body.append("    <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in current report data.</td></tr>")
     body.append("  </table>")
     return "\n".join(body)
 
@@ -632,7 +673,7 @@ def _top_10_html(rows: tuple[MostMentionedRow, ...]) -> str:
             for row in rows
         )
     else:
-        body.append("    <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in fixture data.</td></tr>")
+        body.append("    <tr><td colspan=\"3\" class=\"empty\">No configured tickers were mentioned in current report data.</td></tr>")
     body.append("  </table>")
     return "\n".join(body)
 
@@ -655,7 +696,7 @@ def _emerging_names_html(rows: tuple[EmergingNameRow, ...]) -> str:
             for row in rows
         )
     else:
-        body.append("    <tr><td colspan=\"5\" class=\"empty\">No emerging watchlist names were found in fixture data.</td></tr>")
+        body.append("    <tr><td colspan=\"5\" class=\"empty\">No emerging watchlist names were found in current report data.</td></tr>")
     body.append("  </table>")
     return "\n".join(body)
 
@@ -677,7 +718,7 @@ def _article_links_html(links_by_ticker: Mapping[str, tuple[ArticleLink, ...]]) 
             body.append(f"    <li class=\"empty\">+{len(links) - len(visible_links)} more links in JSON artifacts</li>")
         body.append("  </ul>")
     if not linked:
-        body.append("  <p class=\"empty\">No fixture article links matched configured tickers.</p>")
+        body.append("  <p class=\"empty\">No article links matched configured tickers.</p>")
     return "\n".join(body)
 
 
@@ -693,7 +734,7 @@ def _event_clusters_html(clusters_by_ticker: Mapping[str, tuple[EventClusterRow,
         body.append("  <table>")
         body.append("    <tr><th>Event</th><th>Bucket</th><th>Sentiment</th><th>Extraction Basis</th><th>First Seen</th><th>Latest Seen</th><th>Articles</th><th>Publishers</th><th>Sources</th><th>Visible Links</th></tr>")
         for cluster in visible_clusters:
-            links = list(cluster.supporting_links[:3])
+            links = sorted(cluster.supporting_links, key=lambda link: (link.source_quality_label, link.title, link.url))[:3]
             links_html = "<br>".join(
                 f"<a href=\"{escape(link.url, quote=True)}\">{escape(link.source or link.title)}</a>"
                 for link in links
@@ -724,10 +765,10 @@ def _sentiment_movers_sentence(report_input: DailyReportInput) -> str:
     rows = list(report_input.portfolio_sentiment) + list(report_input.watchlist_sentiment)
     covered = [row for row in rows if row.article_count_30d]
     if not covered:
-        return "No configured ticker had fixture articles, so sentiment did not move in this dry run."
+        return "No configured ticker had current report articles, so sentiment did not move in this dry run."
     strongest = max(covered, key=lambda row: abs(row.sentiment_30d))
     return (
-        f"{strongest.ticker} had the largest fixture sentiment signal at {strongest.sentiment_30d:.2f} "
+        f"{strongest.ticker} had the largest current report sentiment signal at {strongest.sentiment_30d:.2f} "
         f"from {strongest.article_count_30d} article(s), using {strongest.sentiment_basis} sentiment basis."
     )
 
@@ -740,9 +781,9 @@ def _format_optional_score(value: float | None) -> str:
 
 def _news_volume_sentence(top_10: tuple[MostMentionedRow, ...]) -> str:
     if not top_10:
-        return "No configured ticker had measurable fixture news volume."
+        return "No configured ticker had measurable current report news volume."
     leaders = ", ".join(f"{row.ticker} ({row.mentions})" for row in top_10[:3])
-    return f"The highest fixture news volume came from {leaders}."
+    return f"The highest current report news volume came from {leaders}."
 
 
 def _attention_sentence(report_input: DailyReportInput) -> str:
@@ -754,5 +795,15 @@ def _attention_sentence(report_input: DailyReportInput) -> str:
     if not attention and report_input.mention_leaders_7d:
         attention = [report_input.mention_leaders_7d[0].ticker]
     if not attention:
-        return "No ticker deserves elevated attention from this limited fixture set."
-    return f"Tickers deserving attention from fixture coverage: {', '.join(dict.fromkeys(attention[:5]))}."
+        return "No ticker deserves elevated attention from this limited report set."
+    return f"Tickers deserving attention from current coverage: {', '.join(dict.fromkeys(attention[:5]))}."
+
+
+def _quality_rank(label: str) -> int:
+    ranks = {
+        "tier_1_high_trust": 4,
+        "tier_2_usable": 3,
+        "tier_3_low_priority": 2,
+        "tier_4_exclude_by_default": 1,
+    }
+    return ranks.get(label, 3)

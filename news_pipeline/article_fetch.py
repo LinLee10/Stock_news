@@ -14,6 +14,12 @@ from .dedup import DedupeCluster
 from .extract import extract_article, extraction_dependency_status
 from .models import Article
 from .recency import article_recency
+from .source_quality import (
+    DEFAULT_MIN_SOURCE_QUALITY_TIER,
+    TIER_4_EXCLUDE_BY_DEFAULT,
+    assess_article_source,
+    source_quality_sort_key,
+)
 from .tickers import match_tickers
 
 
@@ -181,6 +187,8 @@ def fetch_top_cluster_articles(
     max_fetches_per_ticker: int = DEFAULT_MAX_FETCHES_PER_TICKER,
     fetch_timeout_seconds: float = DEFAULT_FETCH_TIMEOUT_SECONDS,
     user_agent: str = DEFAULT_ARTICLE_FETCH_USER_AGENT,
+    include_low_quality_sources: bool = False,
+    min_source_quality_tier: int = DEFAULT_MIN_SOURCE_QUALITY_TIER,
 ) -> tuple[dict[str, Article], ArticleFetchSummary]:
     """Fetch at most one article page for selected top event clusters."""
     max_article_fetches = max(0, min(DEFAULT_MAX_ARTICLE_FETCHES, int(max_article_fetches)))
@@ -198,6 +206,8 @@ def fetch_top_cluster_articles(
         max_fetches_per_ticker=max_fetches_per_ticker,
         fetch_timeout_seconds=fetch_timeout_seconds,
         user_agent=user_agent,
+        include_low_quality_sources=include_low_quality_sources,
+        min_source_quality_tier=min_source_quality_tier,
         ticker_counts=ticker_counts,
         seen_urls=seen_urls,
     ):
@@ -259,6 +269,8 @@ def _iter_fetch_candidates(
     max_fetches_per_ticker: int,
     fetch_timeout_seconds: float,
     user_agent: str,
+    include_low_quality_sources: bool,
+    min_source_quality_tier: int,
     ticker_counts: dict[str, int],
     seen_urls: set[str],
 ):
@@ -274,6 +286,20 @@ def _iter_fetch_candidates(
         for candidate_article in _cluster_fetch_articles(cluster):
             if attempted_fetches >= max_article_fetches:
                 break
+            source_quality = assess_article_source(candidate_article)
+            if not include_low_quality_sources and (
+                source_quality.tier == TIER_4_EXCLUDE_BY_DEFAULT
+                or source_quality.tier > min_source_quality_tier
+            ):
+                yield cluster.canonical_article, tickers, candidate_article.canonical_url, None, classify_article_url(candidate_article.canonical_url), "source_quality_excluded", _skipped_record(
+                    cluster.canonical_article,
+                    tickers=tickers,
+                    reason="source_quality_excluded",
+                    url_classification=classify_article_url(candidate_article.canonical_url),
+                    requested_url=candidate_article.canonical_url,
+                    resolution_status="source_quality_excluded",
+                )
+                continue
             if candidate_article.canonical_url in seen_urls or not _is_fetchable_url(candidate_article.canonical_url):
                 continue
             seen_urls.add(candidate_article.canonical_url)
@@ -538,22 +564,23 @@ class _ResolvedUrl:
 
 def _cluster_fetch_articles(cluster: DedupeCluster) -> tuple[Article, ...]:
     articles = list(cluster.articles)
-    articles.sort(key=lambda article: (_article_url_rank(article), article.title, article.canonical_url))
+    articles.sort(key=lambda article: (_article_url_rank(article), source_quality_sort_key(article), article.title, article.canonical_url))
     return tuple(articles)
 
 
 def _article_url_rank(article: Article) -> tuple[int, str]:
     url_classification = classify_article_url(article.canonical_url)
+    quality = assess_article_source(article)
     source_name = str(article.metadata.get("source_name") or "").lower()
     provider = str(article.metadata.get("provider") or "").lower()
     preferred_source = any(name in source_name or name in provider for name in ("yahoo", "cnbc", "marketwatch"))
     if url_classification == URL_CLASS_DIRECT_PUBLISHER and preferred_source:
-        return (0, article.canonical_url)
+        return (0, f"{quality.tier}:{article.canonical_url}")
     if url_classification == URL_CLASS_DIRECT_PUBLISHER:
-        return (1, article.canonical_url)
+        return (1, f"{quality.tier}:{article.canonical_url}")
     if url_classification == URL_CLASS_GOOGLE_NEWS_WRAPPER:
-        return (2, article.canonical_url)
-    return (3, article.canonical_url)
+        return (2, f"{quality.tier}:{article.canonical_url}")
+    return (3, f"{quality.tier}:{article.canonical_url}")
 
 
 def _is_google_news_wrapper_url(url: str) -> bool:

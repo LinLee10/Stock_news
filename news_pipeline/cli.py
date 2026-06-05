@@ -47,6 +47,13 @@ from .reporting import (
     build_daily_report,
 )
 from .sentiment import analyze_sentiment
+from .source_quality import (
+    DEFAULT_MIN_SOURCE_QUALITY_TIER,
+    SourceQualitySummary,
+    assess_article_source,
+    filter_articles_by_source_quality,
+    source_quality_link_sort_key,
+)
 from .sources.live_rss import (
     DEFAULT_LIVE_RSS_RETRIES,
     DEFAULT_LIVE_RSS_TIMEOUT_SECONDS,
@@ -93,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
         if command == "dry-run-daily":
             _add_live_rss_args(subparser)
             _add_live_article_fetch_args(subparser)
+            _add_source_quality_args(subparser)
             subparser.add_argument("--run-id")
 
     send_parser = subcommands.add_parser("send-daily-report")
@@ -244,10 +252,29 @@ def main(
                 run_date=args.run_date,
             )
 
-            articles, live_rss_summary = _collect_daily_articles(args, fake_providers, store, run_id)
+            collected_articles, live_rss_summary = _collect_daily_articles(args, fake_providers, store, run_id)
+            source_quality_filter = filter_articles_by_source_quality(
+                collected_articles,
+                include_low_quality_sources=args.include_low_quality_sources,
+                min_source_quality_tier=args.min_source_quality_tier,
+            )
+            articles = list(source_quality_filter.visible_articles)
             _write_json(
                 output_dir / "provider_validation.json",
                 {**context, "providers": provider_results, "live_rss": live_rss_summary},
+            )
+            _write_json(
+                output_dir / "source_quality.json",
+                {
+                    **context,
+                    **source_quality_filter.as_dict(),
+                    "excluded_articles": [
+                        _article_to_dict(article, args.run_date)
+                        for article in source_quality_filter.excluded_articles
+                    ]
+                    if args.show_excluded_source_diagnostics
+                    else [],
+                },
             )
             clusters = cluster_articles(articles)
             enriched_articles_by_url, article_fetch_summary = _run_article_fetch_stage(args, clusters)
@@ -274,7 +301,15 @@ def main(
                 run_date=args.run_date,
             )
             report = build_daily_report(
-                _daily_report_input_from_store(store, run_id, args.run_date, article_fetch_summary),
+                _daily_report_input_from_store(
+                    store,
+                    run_id,
+                    args.run_date,
+                    article_fetch_summary,
+                    source_quality_summary=source_quality_filter.summary,
+                    data_source_label=_data_source_label(args),
+                    show_excluded_source_diagnostics=args.show_excluded_source_diagnostics,
+                ),
                 artifacts_dir=args.artifacts_dir,
             )
         finally:
@@ -304,6 +339,10 @@ def main(
             "run_id": run_id,
             "database_path": str(database_path),
             "article_count": len(articles),
+            "raw_article_count": len(collected_articles),
+            "visible_article_count": source_quality_filter.summary.visible_articles,
+            "excluded_article_count": source_quality_filter.summary.excluded_articles,
+            "source_quality_summary": source_quality_filter.summary.as_dict(),
             "cluster_count": len(clusters),
             "score_count": len(scores),
             "article_pages_fetched": article_fetch_summary.attempted_fetches,
@@ -362,6 +401,12 @@ def _add_live_article_fetch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--fetch-timeout-seconds", type=float, default=DEFAULT_FETCH_TIMEOUT_SECONDS)
 
 
+def _add_source_quality_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--include-low-quality-sources", action="store_true", default=False)
+    parser.add_argument("--min-source-quality-tier", type=int, choices=(1, 2, 3, 4), default=DEFAULT_MIN_SOURCE_QUALITY_TIER)
+    parser.add_argument("--show-excluded-source-diagnostics", action="store_true", default=False)
+
+
 def _add_send_daily_report_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-date", required=True)
     parser.add_argument("--artifacts-dir", default="artifacts")
@@ -382,6 +427,9 @@ def _safe_context(args: argparse.Namespace) -> dict[str, object]:
         "email_send_enabled": getattr(args, "enable_email_send", False),
         "live_rss_enabled": bool(getattr(args, "enable_live_rss", False)),
         "live_article_fetch_enabled": bool(getattr(args, "enable_live_article_fetch", False)),
+        "include_low_quality_sources": bool(getattr(args, "include_low_quality_sources", False)),
+        "min_source_quality_tier": int(getattr(args, "min_source_quality_tier", DEFAULT_MIN_SOURCE_QUALITY_TIER)),
+        "show_excluded_source_diagnostics": bool(getattr(args, "show_excluded_source_diagnostics", False)),
         "fixtures_included": bool(getattr(args, "include_fixtures", False)) or not bool(getattr(args, "enable_live_rss", False)),
         "output_dir": str(_run_output_dir(args.artifacts_dir, args.run_date)),
         "rss_fixtures_dir": getattr(args, "rss_fixtures_dir", ""),
@@ -631,6 +679,8 @@ def _run_article_fetch_stage(args: argparse.Namespace, clusters: Sequence[object
         max_article_fetches=args.max_article_fetches,
         max_fetches_per_ticker=args.max_fetches_per_ticker,
         fetch_timeout_seconds=args.fetch_timeout_seconds,
+        include_low_quality_sources=args.include_low_quality_sources,
+        min_source_quality_tier=args.min_source_quality_tier,
     )
 
 
@@ -754,11 +804,12 @@ def _daily_report_input(run_date: str, articles: Sequence[Article]) -> DailyRepo
             for rank, (symbol, count, _score) in enumerate(mentioned[:10], start=1)
         ),
         emerging_names=tuple(
-            EmergingNameRow(ticker.symbol, ticker.company_name, len(scored_articles.get(ticker.symbol, ())), 0, "fixture mention")
+            EmergingNameRow(ticker.symbol, ticker.company_name, len(scored_articles.get(ticker.symbol, ())), 0, "configured ticker mention")
             for ticker in load_watchlist()
             if scored_articles.get(ticker.symbol)
         ),
         article_links_by_ticker=article_links,
+        data_source_label="local RSS fixtures",
     )
 
 
@@ -767,6 +818,9 @@ def _daily_report_input_from_store(
     run_id: str,
     run_date: str,
     article_fetch_summary: ArticleFetchSummary | None = None,
+    source_quality_summary: SourceQualitySummary | None = None,
+    data_source_label: str = "local RSS fixtures",
+    show_excluded_source_diagnostics: bool = False,
 ) -> DailyReportInput:
     articles_by_id = {str(row["article_id"]): row for row in store.list_run_articles(run_id)}
     sources_by_article: dict[str, dict[str, object]] = {}
@@ -838,7 +892,7 @@ def _daily_report_input_from_store(
             for rank, (symbol, count, _score) in enumerate(mentioned[:10], start=1)
         ),
         emerging_names=tuple(
-            EmergingNameRow(ticker.symbol, ticker.company_name, len(mentions_by_ticker.get(ticker.symbol, ())), 0, "fixture mention")
+            EmergingNameRow(ticker.symbol, ticker.company_name, len(mentions_by_ticker.get(ticker.symbol, ())), 0, "live RSS mention")
             for ticker in load_watchlist()
             if mentions_by_ticker.get(ticker.symbol)
         ),
@@ -848,7 +902,10 @@ def _daily_report_input_from_store(
             article_fetch_summary,
             extractions_by_article,
             sentiment_basis_counts,
+            source_quality_summary=source_quality_summary,
+            show_excluded_source_diagnostics=show_excluded_source_diagnostics,
         ),
+        data_source_label=data_source_label,
     )
 
 
@@ -868,13 +925,30 @@ def _event_clusters_by_ticker_from_store(
                 title=str(link.get("title") or title),
                 url=str(link.get("url") or row["canonical_url"]),
                 source=str(link.get("publisher") or link.get("provider") or ""),
+                source_quality_label=assess_article_source(
+                    Article(
+                        canonical_url=str(link.get("url") or row["canonical_url"]),
+                        title=str(link.get("title") or title),
+                        metadata={"source_name": str(link.get("publisher") or link.get("provider") or "")},
+                    )
+                ).label,
             )
             for link in json.loads(str(row.get("supporting_links_json") or "[]"))
         )
+        sorted_supporting_links = tuple(
+            sorted(
+                supporting_links,
+                key=lambda link: source_quality_link_sort_key(link.title, link.url, link.source),
+            )
+        )
+        primary_link = sorted_supporting_links[0].url if sorted_supporting_links else str(row.get("primary_link") or row["canonical_url"])
+        primary_quality_label = sorted_supporting_links[0].source_quality_label if sorted_supporting_links else assess_article_source(
+            Article(canonical_url=str(row.get("primary_link") or row["canonical_url"]), title=title)
+        ).label
         event = EventClusterRow(
             ticker="",
             title=title,
-            primary_link=str(row.get("primary_link") or row["canonical_url"]),
+            primary_link=primary_link,
             publisher_count=int(row.get("publisher_count") or 0),
             source_count=int(row.get("source_count") or 0),
             article_count=len(json.loads(str(row.get("article_ids_json") or "[]"))) or max(1, len(supporting_links)),
@@ -889,7 +963,8 @@ def _event_clusters_by_ticker_from_store(
                 else None
             ),
             extraction_basis=str(extraction.get("extraction_basis") or "not_fetched"),
-            supporting_links=supporting_links,
+            source_quality_label=primary_quality_label,
+            supporting_links=sorted_supporting_links,
         )
         tickers = match_tickers(title)
         if not tickers:
@@ -910,11 +985,12 @@ def _event_clusters_by_ticker_from_store(
                     tickers_mentioned=event.tickers_mentioned,
                     weighted_cluster_sentiment=event.weighted_cluster_sentiment,
                     extraction_basis=event.extraction_basis,
+                    source_quality_label=event.source_quality_label,
                     supporting_links=event.supporting_links,
                 )
             )
     return {
-        symbol: tuple(sorted(rows, key=lambda event: (-event.publisher_count, -event.article_count, event.title))[:10])
+        symbol: tuple(sorted(rows, key=lambda event: (event.source_quality_label, -event.publisher_count, -event.article_count, event.title))[:10])
         for symbol, rows in grouped.items()
     }
 
@@ -926,7 +1002,7 @@ def _article_links_from_event_clusters(
     for ticker in load_tracked_tickers():
         links: list[ArticleLink] = []
         for event in event_clusters_by_ticker.get(ticker.symbol, ()):
-            links.append(ArticleLink(event.title, event.primary_link, f"{event.publisher_count} publisher(s)"))
+            links.append(ArticleLink(event.title, event.primary_link, f"{event.publisher_count} publisher(s)", event.source_quality_label))
         links_by_ticker[ticker.symbol] = tuple(links)
     return links_by_ticker
 
@@ -935,7 +1011,11 @@ def _extraction_summary_from_fetch_summary(
     article_fetch_summary: ArticleFetchSummary | None,
     extractions_by_article: Mapping[str, Mapping[str, object]],
     sentiment_basis_counts: Mapping[str, int],
+    *,
+    source_quality_summary: SourceQualitySummary | None = None,
+    show_excluded_source_diagnostics: bool = False,
 ) -> ExtractionSummary:
+    quality_summary = source_quality_summary or SourceQualitySummary()
     if article_fetch_summary is not None:
         return ExtractionSummary(
             article_pages_fetched=article_fetch_summary.attempted_fetches,
@@ -951,6 +1031,8 @@ def _extraction_summary_from_fetch_summary(
             extraction_method_counts=article_fetch_summary.extraction_method_counts,
             extraction_failure_reason=article_fetch_summary.extraction_failure_reason,
             extractor_diagnostics=article_fetch_summary.extractor_diagnostics or {},
+            source_quality_summary=quality_summary,
+            show_excluded_source_diagnostics=show_excluded_source_diagnostics,
         )
     fetched_count = sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0))
     success_count = sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text")
@@ -964,6 +1046,8 @@ def _extraction_summary_from_fetch_summary(
         sentiment_basis_counts=sentiment_basis_counts,
         extraction_method_counts=_stored_extraction_method_counts(extractions_by_article),
         extraction_failure_reason=_stored_extraction_failure_reason(extractions_by_article),
+        source_quality_summary=quality_summary,
+        show_excluded_source_diagnostics=show_excluded_source_diagnostics,
     )
 
 
@@ -1057,6 +1141,14 @@ def _provider_validation_results(
         validate_provider(config, dry_run=args.dry_run, environ=environ, checker=provider_checker).as_safe_dict()
         for config in iter_provider_configs()
     ]
+
+
+def _data_source_label(args: argparse.Namespace) -> str:
+    if getattr(args, "enable_live_rss", False) and getattr(args, "include_fixtures", False):
+        return "free live RSS plus local RSS fixtures"
+    if getattr(args, "enable_live_rss", False):
+        return "free live RSS feeds"
+    return "local RSS fixtures"
 
 
 def _persist_run_articles(store: SQLiteStore, run_id: str, articles: Sequence[Article]) -> dict[str, str]:
@@ -1259,7 +1351,7 @@ def _sentiment_basis(items: Sequence[dict[str, object]]) -> str:
 def _watchlist_forecast_row(ticker: TrackedTicker, items: Sequence[dict[str, object]]) -> WatchlistForecastRow:
     average = _average_score(items)
     if not items:
-        return WatchlistForecastRow(ticker.symbol, "uncertain", 0.0, "no fixture articles")
+        return WatchlistForecastRow(ticker.symbol, "uncertain", 0.0, "no current report articles")
     if average > 0.1:
         direction = "up"
     elif average < -0.1:
@@ -1273,7 +1365,7 @@ def _watchlist_forecast_row(ticker: TrackedTicker, items: Sequence[dict[str, obj
         ticker.symbol,
         direction,
         confidence,
-        f"fixture sentiment from {len(items)} article(s)",
+        f"current report sentiment from {len(items)} article(s)",
     )
 
 
@@ -1304,7 +1396,7 @@ def _sentiment_basis_counts(scores: Sequence[SentimentResult]) -> dict[str, int]
 def _watchlist_forecast_row_from_stored(ticker: TrackedTicker, items: Sequence[dict[str, object]]) -> WatchlistForecastRow:
     average = _stored_average_score(items)
     if not items:
-        return WatchlistForecastRow(ticker.symbol, "uncertain", 0.0, "no fixture articles")
+        return WatchlistForecastRow(ticker.symbol, "uncertain", 0.0, "no current report articles")
     if average > 0.1:
         direction = "up"
     elif average < -0.1:
@@ -1316,7 +1408,7 @@ def _watchlist_forecast_row_from_stored(ticker: TrackedTicker, items: Sequence[d
         ticker.symbol,
         direction,
         confidence,
-        f"placeholder forecast from stored fixture sentiment for {len(items)} article(s)",
+        f"placeholder direction from current report sentiment for {len(items)} article(s)",
     )
 
 
@@ -1409,11 +1501,17 @@ def _write_markdown_report(report: DailyReportContract) -> str:
     lines = [
         f"# Daily News Pipeline Dry Run - {report.report_date}",
         "",
-        "Data source: local RSS fixture files by default, plus free live RSS only when explicitly enabled. Watchlist next-close direction uses placeholder fixture sentiment logic.",
+        f"Data source: {report.data_source_label}. No paid APIs were called and no email was sent.",
         "",
-        "Sentiment is deterministic placeholder logic until a stronger model is wired in. This report is not investment advice.",
+        "Sentiment is deterministic placeholder logic, and watchlist direction rows are not real predictions. This report is not investment advice.",
         "",
         report.daily_summary,
+        "",
+        "## Source Quality Summary",
+        "",
+        "| Total Articles | Visible Articles | Excluded Articles | Tier 1 | Tier 2 | Tier 3 Visible | Tier 4 Excluded |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        _markdown_source_quality_summary_row(report.extraction_summary.source_quality_summary),
         "",
         "## Article Extraction Summary",
         "",
@@ -1460,7 +1558,7 @@ def _write_markdown_report(report: DailyReportContract) -> str:
             "",
             "## Watchlist Next Close",
             "",
-            "Placeholder forecast logic: direction is derived from fixture sentiment only. This is not a live model prediction.",
+            "Placeholder direction logic: direction is derived from current report sentiment. These rows are not real predictions.",
             "",
             "| Ticker | Direction | Confidence | Driver |",
             "| --- | --- | ---: | --- |",
@@ -1517,7 +1615,7 @@ def _write_markdown_report(report: DailyReportContract) -> str:
             for row in report.emerging_names_table
         )
     else:
-        lines.append("| none | none | 0 | 0 | no emerging watchlist names in fixture data |")
+        lines.append("| none | none | 0 | 0 | no emerging watchlist names in current report data |")
     lines.extend(["", "## Top Event Clusters By Recency And Source Diversity", ""])
     event_written = False
     for ticker, clusters in sorted(report.event_clusters_by_ticker.items()):
@@ -1554,13 +1652,24 @@ def _write_markdown_report(report: DailyReportContract) -> str:
             lines.append(f"- +{len(links) - len(visible_links)} more links in JSON artifacts")
         lines.append("")
     if not linked:
-        lines.append("No fixture article links matched configured tickers.")
+        lines.append("No article links matched configured tickers.")
     report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     return str(report_path)
 
 
 def _escape_markdown(value: str | None) -> str:
     return (value or "").replace("|", "\\|")
+
+
+def _markdown_source_quality_summary_row(summary: SourceQualitySummary) -> str:
+    tier_counts = summary.visible_tier_counts or summary.tier_counts
+    return (
+        f"| {summary.total_articles} | {summary.visible_articles} | {summary.excluded_articles} | "
+        f"{int(tier_counts.get('tier_1_high_trust', 0))} | "
+        f"{int(tier_counts.get('tier_2_usable', 0))} | "
+        f"{summary.low_priority_visible_articles} | "
+        f"{int(summary.excluded_tier_counts.get('tier_4_exclude_by_default', 0))} |"
+    )
 
 
 def _markdown_extraction_summary_row(summary: ExtractionSummary) -> str:
