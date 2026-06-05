@@ -66,7 +66,7 @@ def _render_email_preview(
         "<body>",
         "  <div class=\"wrap\">",
         f"    <h1>{escape(subject)}</h1>",
-        "    <div class=\"note\"><strong>Preview only:</strong> This file is a local email preview. No SMTP, Gmail, Resend, or other live email provider was contacted.</div>",
+        "    <div class=\"note\"><strong>Preview only:</strong> no live email provider was contacted.</div>",
         f"    <div class=\"note\"><strong>Data source:</strong> {escape(report.data_source_label)}. No paid APIs were called.</div>",
         "    <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic, and watchlist direction rows are not real predictions. This preview is not investment advice.</div>",
         f"    <div class=\"summary\">{escape(report.daily_summary)}</div>",
@@ -152,20 +152,21 @@ def _extraction_summary(report: DailyReportContract) -> str:
 
 def _source_quality_summary(report: DailyReportContract) -> str:
     summary = report.extraction_summary.source_quality_summary
-    tier_counts = summary.visible_tier_counts or summary.tier_counts
     return "\n".join(
         [
             "    <h2>Source Quality Summary</h2>",
             "    <table>",
-            "      <tr><th>Total Articles</th><th>Visible Articles</th><th>Excluded Articles</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3 Visible</th><th>Tier 4 Excluded</th></tr>",
+            "      <tr><th>Total Articles</th><th>Visible Articles</th><th>Excluded Articles</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3 Visible</th><th>Tier 3 Hidden</th><th>Tier 4 Excluded</th><th>Unknown</th></tr>",
             "      <tr>"
             f"<td class=\"num\">{summary.total_articles}</td>"
             f"<td class=\"num\">{summary.visible_articles}</td>"
             f"<td class=\"num\">{summary.excluded_articles}</td>"
-            f"<td class=\"num\">{int(tier_counts.get('tier_1_high_trust', 0))}</td>"
-            f"<td class=\"num\">{int(tier_counts.get('tier_2_usable', 0))}</td>"
-            f"<td class=\"num\">{summary.low_priority_visible_articles}</td>"
-            f"<td class=\"num\">{int(summary.excluded_tier_counts.get('tier_4_exclude_by_default', 0))}</td>"
+            f"<td class=\"num\">{summary.tier_1_articles}</td>"
+            f"<td class=\"num\">{summary.tier_2_articles}</td>"
+            f"<td class=\"num\">{summary.tier_3_visible_articles}</td>"
+            f"<td class=\"num\">{summary.tier_3_hidden_articles}</td>"
+            f"<td class=\"num\">{summary.tier_4_excluded_articles}</td>"
+            f"<td class=\"num\">{summary.unknown_articles}</td>"
             "</tr>",
             "    </table>",
             _excluded_sources(summary),
@@ -174,11 +175,23 @@ def _source_quality_summary(report: DailyReportContract) -> str:
 
 
 def _excluded_sources(summary) -> str:
-    if not summary.excluded_sources:
-        return "    <p class=\"muted\">No low-quality sources were excluded.</p>"
-    sources = ", ".join(summary.excluded_sources[:8])
-    suffix = f" and {len(summary.excluded_sources) - 8} more" if len(summary.excluded_sources) > 8 else ""
-    return f"    <p class=\"muted\">Excluded or hidden low-quality sources: {escape(sources + suffix)}.</p>"
+    parts = []
+    if summary.excluded_sources:
+        parts.append(f"Excluded by source/title filters: {_source_list(summary.excluded_sources)}.")
+    if summary.hidden_sources:
+        parts.append(f"Hidden lower-priority sources: {_source_list(summary.hidden_sources)}.")
+    if summary.unclassified_sources:
+        parts.append(f"Unclassified sources kept as usable: {_source_list(summary.unclassified_sources)}.")
+    if not parts:
+        parts.append("No source quality exclusions or lower-priority hides were applied.")
+    return f"    <p class=\"muted\">{escape(' '.join(parts))}</p>"
+
+
+def _source_list(sources: tuple[str, ...]) -> str:
+    shown = ", ".join(sources[:8])
+    if len(sources) > 8:
+        return f"{shown} and {len(sources) - 8} more"
+    return shown
 
 
 def _extraction_diagnostics(summary) -> str:
@@ -407,7 +420,7 @@ def _format_optional_score(value):
 def _attachment_manifest(attachments: tuple[str, ...]) -> str:
     body = [
         "    <h2>Intended Attachments</h2>",
-        "    <p>These local files would be attached by a future live email sender.</p>",
+        "    <p>These files would be attached.</p>",
         "    <ul>",
     ]
     if attachments:

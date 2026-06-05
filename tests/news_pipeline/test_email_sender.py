@@ -169,6 +169,48 @@ class EmailSenderCliTests(unittest.TestCase):
             list(DEFAULT_EMAIL_ATTACHMENT_NAMES),
         )
 
+    def test_real_send_render_does_not_use_preview_wording(self):
+        fake_sender = FakeEmailSender()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_report_artifacts(temp_dir)
+            stdout, exit_code = _run_cli(
+                "send-daily-report",
+                temp_dir,
+                extra_args=["--to", "reader@example.com", "--confirm-send"],
+                email_sender=fake_sender,
+            )
+            payload = json.loads(stdout)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["sent"])
+        html = fake_sender.sent_payloads[0].html_body
+        self.assertIn("Sent email report:", html)
+        self.assertIn("delivered through the configured SMTP sender.", html)
+        self.assertIn("Attached CSV Files", html)
+        self.assertIn("Attached CSV files.", html)
+        self.assertNotIn("Preview only:", html)
+        self.assertNotIn("future live email sender", html)
+
+    def test_plain_text_fallback_includes_useful_summary(self):
+        fake_sender = FakeEmailSender()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_report_artifacts(temp_dir)
+            _stdout, exit_code = _run_cli(
+                "send-daily-report",
+                temp_dir,
+                extra_args=["--to", "reader@example.com", "--confirm-send"],
+                email_sender=fake_sender,
+            )
+
+        self.assertEqual(exit_code, 0)
+        text = fake_sender.sent_payloads[0].plain_text_body
+        self.assertIn("Daily Stock News Sentiment Report - 2026-06-03", text)
+        self.assertIn("Portfolio coverage: 1 of 2 configured names.", text)
+        self.assertIn("Watchlist coverage: 1 of 1 configured names.", text)
+        self.assertIn("Top mention leaders: NVDA (3).", text)
+        self.assertIn("portfolio_30d_sentiment.csv", text)
+        self.assertIn("The HTML part of this email contains the full report.", text)
+
 
 def _run_cli(
     command,
@@ -196,10 +238,35 @@ def _run_cli(
 def _write_report_artifacts(temp_dir):
     output_dir = Path(temp_dir) / "artifacts" / "runs" / "2026-06-03"
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "email_preview.html").write_text("<html><body>Daily report</body></html>", encoding="utf-8")
+    (output_dir / "email_preview.html").write_text(
+        "<html><body>"
+        "<div><strong>Preview only:</strong> This file is a local email preview. No SMTP, Gmail, Resend, or other live email provider was contacted.</div>"
+        "<h2>Intended Attachments</h2><p>These files would be attached.</p>"
+        "</body></html>",
+        encoding="utf-8",
+    )
     (output_dir / "daily_report.html").write_text("<html><body>Report</body></html>", encoding="utf-8")
     (output_dir / "daily_report.md").write_text("# Report\n", encoding="utf-8")
-    (output_dir / "report_contract.json").write_text("{}", encoding="utf-8")
+    (output_dir / "report_contract.json").write_text(
+        json.dumps(
+            {
+                "report": {
+                    "daily_summary": "Daily report for 2026-06-03: NVDA leads mention volume.",
+                    "portfolio_30d_sentiment_table": [
+                        {"ticker": "NVDA", "article_count_30d": 2},
+                        {"ticker": "ASML", "article_count_30d": 0},
+                    ],
+                    "watchlist_sentiment_table": [
+                        {"ticker": "AMD", "article_count_30d": 1},
+                    ],
+                    "top_10_most_mentioned_table": [
+                        {"ticker": "NVDA", "mentions": 3},
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     for filename in DEFAULT_EMAIL_ATTACHMENT_NAMES:
         (output_dir / filename).write_text("ticker,value\nNVDA,1\n", encoding="utf-8")
     return output_dir

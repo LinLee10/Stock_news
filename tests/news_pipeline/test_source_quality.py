@@ -81,7 +81,43 @@ class SourceQualityTests(unittest.TestCase):
         )
         self.assertEqual([article.metadata["source_name"] for article in result.visible_articles], ["CNBC", "Yahoo Finance"])
         self.assertEqual(result.excluded_articles[0].metadata["source_name"], "Stocktwits")
-        self.assertEqual(result.summary.low_priority_visible_articles, 0)
+        self.assertEqual(result.summary.tier_3_visible_articles, 0)
+        self.assertEqual(result.summary.tier_3_hidden_articles, 1)
+
+    def test_unknown_unclassified_sources_are_counted(self):
+        result = filter_articles_by_source_quality(
+            [
+                Article(
+                    canonical_url="https://unknown.example.com/nvda",
+                    title="NVDA from an unlisted source",
+                    snippet="NVDA stock news.",
+                    published_at="2026-06-03T10:00:00+00:00",
+                    metadata={},
+                ),
+            ]
+        )
+
+        self.assertEqual(result.summary.visible_articles, 1)
+        self.assertEqual(result.summary.unknown_articles, 1)
+        self.assertEqual(result.summary.unclassified_sources, ("unknown.example.com",))
+
+    def test_cnbc_is_not_labeled_low_quality_in_source_summary(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stdout = _run_cli(
+                temp_dir,
+                articles=[
+                    _article("https://www.cnbc.com/nvda-1", "CNBC", title="NVDA earnings from CNBC"),
+                    _article("https://finance.yahoo.com/news/nvda-2", "Yahoo Finance", title="NVDA earnings from Yahoo Finance"),
+                    _article("https://stocktwits.com/nvda-3", "Stocktwits", title="NVDA chatter from Stocktwits"),
+                ],
+            )
+            payload = json.loads(stdout)
+            email_html = (Path(payload["output_dir"]) / "email_preview.html").read_text(encoding="utf-8")
+
+        self.assertIn("Hidden lower-priority sources: Stocktwits.", email_html)
+        self.assertNotIn("low-quality sources: CNBC", email_html)
+        self.assertNotIn("Excluded or hidden low-quality sources", email_html)
+        self.assertNotIn("CNBC.", email_html.split("Source Quality Summary", 1)[1].split("Article Extraction Summary", 1)[0])
 
     def test_source_quality_summary_appears_and_fixture_wording_is_removed_for_live_report(self):
         live_feed = """<?xml version="1.0"?>

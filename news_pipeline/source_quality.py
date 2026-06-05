@@ -23,6 +23,7 @@ TIER_LABELS = {
     TIER_3_LOW_PRIORITY: "tier_3_low_priority",
     TIER_4_EXCLUDE_BY_DEFAULT: "tier_4_exclude_by_default",
 }
+UNKNOWN_SOURCE_LABEL = "unknown_unclassified"
 
 TIER_1_NAMES = {
     "associated press",
@@ -172,10 +173,18 @@ class SourceQualitySummary:
     visible_articles: int = 0
     excluded_articles: int = 0
     low_priority_visible_articles: int = 0
+    tier_1_articles: int = 0
+    tier_2_articles: int = 0
+    tier_3_visible_articles: int = 0
+    tier_3_hidden_articles: int = 0
+    tier_4_excluded_articles: int = 0
+    unknown_articles: int = 0
     tier_counts: dict[str, int] = field(default_factory=dict)
     visible_tier_counts: dict[str, int] = field(default_factory=dict)
     excluded_tier_counts: dict[str, int] = field(default_factory=dict)
     excluded_sources: tuple[str, ...] = ()
+    hidden_sources: tuple[str, ...] = ()
+    unclassified_sources: tuple[str, ...] = ()
     min_source_quality_tier: int = DEFAULT_MIN_SOURCE_QUALITY_TIER
     include_low_quality_sources: bool = False
 
@@ -185,10 +194,18 @@ class SourceQualitySummary:
             "visible_articles": self.visible_articles,
             "excluded_articles": self.excluded_articles,
             "low_priority_visible_articles": self.low_priority_visible_articles,
+            "tier_1_articles": self.tier_1_articles,
+            "tier_2_articles": self.tier_2_articles,
+            "tier_3_visible_articles": self.tier_3_visible_articles,
+            "tier_3_hidden_articles": self.tier_3_hidden_articles,
+            "tier_4_excluded_articles": self.tier_4_excluded_articles,
+            "unknown_articles": self.unknown_articles,
             "tier_counts": dict(self.tier_counts),
             "visible_tier_counts": dict(self.visible_tier_counts),
             "excluded_tier_counts": dict(self.excluded_tier_counts),
             "excluded_sources": list(self.excluded_sources),
+            "hidden_sources": list(self.hidden_sources),
+            "unclassified_sources": list(self.unclassified_sources),
             "min_source_quality_tier": self.min_source_quality_tier,
             "include_low_quality_sources": self.include_low_quality_sources,
         }
@@ -225,7 +242,14 @@ def assess_article_source(article: Article) -> SourceQuality:
         return _quality(TIER_2_USABLE, "usable_financial_source", publisher, domain)
     if _matches_any(publisher, TIER_3_NAMES) or domain in TIER_3_DOMAINS:
         return _quality(TIER_3_LOW_PRIORITY, "low_priority_source", publisher, domain)
-    return _quality(TIER_2_USABLE, "unlisted_source", publisher, domain)
+    return SourceQuality(
+        tier=TIER_2_USABLE,
+        label=UNKNOWN_SOURCE_LABEL,
+        reason="unclassified_source",
+        publisher=publisher,
+        domain=domain,
+        excluded_by_default=False,
+    )
 
 
 def annotate_article_quality(article: Article) -> Article:
@@ -366,21 +390,50 @@ def _summary(
         low_priority_visible_articles=sum(
             1 for article in visible if assess_article_source(article).tier == TIER_3_LOW_PRIORITY
         ),
+        tier_1_articles=sum(1 for article in all_articles if assess_article_source(article).tier == TIER_1_HIGH_TRUST),
+        tier_2_articles=sum(
+            1
+            for article in all_articles
+            if assess_article_source(article).tier == TIER_2_USABLE
+            and assess_article_source(article).label != UNKNOWN_SOURCE_LABEL
+        ),
+        tier_3_visible_articles=sum(1 for article in visible if assess_article_source(article).tier == TIER_3_LOW_PRIORITY),
+        tier_3_hidden_articles=sum(1 for article in excluded if assess_article_source(article).tier == TIER_3_LOW_PRIORITY),
+        tier_4_excluded_articles=sum(1 for article in excluded if assess_article_source(article).tier == TIER_4_EXCLUDE_BY_DEFAULT),
+        unknown_articles=sum(1 for article in all_articles if assess_article_source(article).label == UNKNOWN_SOURCE_LABEL),
         tier_counts=_tier_counts(all_articles),
         visible_tier_counts=_tier_counts(visible),
         excluded_tier_counts=_tier_counts(excluded),
-        excluded_sources=tuple(sorted({_publisher(article) or _domain(article.canonical_url) for article in excluded})),
+        excluded_sources=_source_names(
+            article
+            for article in excluded
+            if assess_article_source(article).tier == TIER_4_EXCLUDE_BY_DEFAULT
+        ),
+        hidden_sources=_source_names(
+            article
+            for article in excluded
+            if assess_article_source(article).tier == TIER_3_LOW_PRIORITY
+        ),
+        unclassified_sources=_source_names(
+            article
+            for article in all_articles
+            if assess_article_source(article).label == UNKNOWN_SOURCE_LABEL
+        ),
         min_source_quality_tier=min_source_quality_tier,
         include_low_quality_sources=include_low_quality_sources,
     )
 
 
 def _tier_counts(articles) -> dict[str, int]:
-    counts = {label: 0 for label in TIER_LABELS.values()}
+    counts = {label: 0 for label in tuple(TIER_LABELS.values()) + (UNKNOWN_SOURCE_LABEL,)}
     for article in articles:
         label = assess_article_source(article).label
         counts[label] = counts.get(label, 0) + 1
     return counts
+
+
+def _source_names(articles) -> tuple[str, ...]:
+    return tuple(sorted({_publisher(article) or _domain(article.canonical_url) or "unknown" for article in articles}))
 
 
 def _quality(tier: int, reason: str, publisher: str, domain: str) -> SourceQuality:

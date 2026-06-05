@@ -477,20 +477,21 @@ def _extraction_summary_html(summary: ExtractionSummary) -> str:
 
 
 def _source_quality_summary_html(summary: SourceQualitySummary) -> str:
-    tier_counts = summary.visible_tier_counts or summary.tier_counts
     return "\n".join(
         [
             "  <h2>Source Quality Summary</h2>",
             "  <table>",
-            "    <tr><th>Total Articles</th><th>Visible Articles</th><th>Excluded Articles</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3 Visible</th><th>Tier 4 Excluded</th></tr>",
+            "    <tr><th>Total Articles</th><th>Visible Articles</th><th>Excluded Articles</th><th>Tier 1</th><th>Tier 2</th><th>Tier 3 Visible</th><th>Tier 3 Hidden</th><th>Tier 4 Excluded</th><th>Unknown</th></tr>",
             "    <tr>"
             f"<td class=\"num\">{summary.total_articles}</td>"
             f"<td class=\"num\">{summary.visible_articles}</td>"
             f"<td class=\"num\">{summary.excluded_articles}</td>"
-            f"<td class=\"num\">{int(tier_counts.get('tier_1_high_trust', 0))}</td>"
-            f"<td class=\"num\">{int(tier_counts.get('tier_2_usable', 0))}</td>"
-            f"<td class=\"num\">{summary.low_priority_visible_articles}</td>"
-            f"<td class=\"num\">{int(summary.excluded_tier_counts.get('tier_4_exclude_by_default', 0))}</td>"
+            f"<td class=\"num\">{summary.tier_1_articles}</td>"
+            f"<td class=\"num\">{summary.tier_2_articles}</td>"
+            f"<td class=\"num\">{summary.tier_3_visible_articles}</td>"
+            f"<td class=\"num\">{summary.tier_3_hidden_articles}</td>"
+            f"<td class=\"num\">{summary.tier_4_excluded_articles}</td>"
+            f"<td class=\"num\">{summary.unknown_articles}</td>"
             "</tr>",
             "  </table>",
             _excluded_sources_html(summary),
@@ -499,11 +500,23 @@ def _source_quality_summary_html(summary: SourceQualitySummary) -> str:
 
 
 def _excluded_sources_html(summary: SourceQualitySummary) -> str:
-    if not summary.excluded_sources:
-        return "  <p class=\"muted\">No low-quality sources were excluded.</p>"
-    sources = ", ".join(summary.excluded_sources[:8])
-    suffix = f" and {len(summary.excluded_sources) - 8} more" if len(summary.excluded_sources) > 8 else ""
-    return f"  <p class=\"muted\">Excluded or hidden low-quality sources: {escape(sources + suffix)}.</p>"
+    parts = []
+    if summary.excluded_sources:
+        parts.append(f"Excluded by source/title filters: {_source_list(summary.excluded_sources)}.")
+    if summary.hidden_sources:
+        parts.append(f"Hidden lower-priority sources: {_source_list(summary.hidden_sources)}.")
+    if summary.unclassified_sources:
+        parts.append(f"Unclassified sources kept as usable: {_source_list(summary.unclassified_sources)}.")
+    if not parts:
+        parts.append("No source quality exclusions or lower-priority hides were applied.")
+    return f"  <p class=\"muted\">{escape(' '.join(parts))}</p>"
+
+
+def _source_list(sources: tuple[str, ...]) -> str:
+    shown = ", ".join(sources[:8])
+    if len(sources) > 8:
+        return f"{shown} and {len(sources) - 8} more"
+    return shown
 
 
 def _extraction_diagnostics_html(summary: ExtractionSummary) -> str:

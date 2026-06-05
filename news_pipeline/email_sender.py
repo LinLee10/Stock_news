@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from email.message import EmailMessage
+import json
 import mimetypes
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ DEFAULT_EMAIL_ATTACHMENT_NAMES: tuple[str, ...] = (
 )
 DEFAULT_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
+PREVIEW_MODE = "preview_mode"
+REAL_SEND_MODE = "real_send_mode"
 
 
 @dataclass(frozen=True)
@@ -58,9 +61,11 @@ class EmailSendPayload:
     subject: str
     to: str
     html_body: str
+    plain_text_body: str
     attachments: tuple[AttachmentManifestItem, ...]
     preview_path: str
     report_artifacts: tuple[str, ...]
+    delivery_mode: str = PREVIEW_MODE
 
     def as_safe_dict(self) -> dict[str, object]:
         return {
@@ -68,6 +73,7 @@ class EmailSendPayload:
             "to": self.to,
             "preview_path": self.preview_path,
             "report_artifacts": list(self.report_artifacts),
+            "delivery_mode": self.delivery_mode,
             "attachments": [
                 {
                     "path": item.path,
@@ -147,7 +153,7 @@ class SmtpEmailSender:
         msg["Subject"] = payload.subject
         msg["From"] = config.from_address
         msg["To"] = payload.to
-        msg.set_content("This report requires an HTML-capable email client.")
+        msg.set_content(payload.plain_text_body)
         msg.add_alternative(payload.html_body, subtype="html")
 
         for attachment in payload.attachments:
@@ -199,6 +205,7 @@ def build_report_email_payload(
     attachment_names: Sequence[str] = DEFAULT_EMAIL_ATTACHMENT_NAMES,
     max_attachment_bytes: int = DEFAULT_MAX_ATTACHMENT_BYTES,
     max_total_attachment_bytes: int = DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES,
+    delivery_mode: str = PREVIEW_MODE,
 ) -> tuple[EmailSendPayload, AttachmentManifest]:
     if not recipient:
         raise EmailSendError("missing_recipient")
@@ -222,10 +229,19 @@ def build_report_email_payload(
         EmailSendPayload(
             subject=f"Daily Stock News Sentiment Report - {run_date}",
             to=recipient,
-            html_body=preview_path.read_text(encoding="utf-8"),
+            html_body=_html_for_delivery_mode(
+                preview_path.read_text(encoding="utf-8"),
+                delivery_mode=delivery_mode,
+            ),
+            plain_text_body=_plain_text_body(
+                run_date=run_date,
+                output_dir=output_dir,
+                attachments=manifest.attachments,
+            ),
             attachments=manifest.attachments,
             preview_path=str(preview_path),
             report_artifacts=tuple(str(path) for path in report_artifacts),
+            delivery_mode=delivery_mode,
         ),
         manifest,
     )
@@ -278,6 +294,75 @@ def _required_report_artifacts(output_dir: Path) -> tuple[Path, ...]:
         output_dir / "daily_report.md",
         output_dir / "report_contract.json",
     )
+
+
+def _html_for_delivery_mode(html: str, *, delivery_mode: str) -> str:
+    if delivery_mode != REAL_SEND_MODE:
+        return html
+    return (
+        html.replace(
+            "<strong>Preview only:</strong> This file is a local email preview. No SMTP, Gmail, Resend, or other live email provider was contacted.",
+            "<strong>Sent email report:</strong> delivered through the configured SMTP sender.",
+        )
+        .replace(
+            "<strong>Preview only:</strong> no live email provider was contacted.",
+            "<strong>Sent email report:</strong> delivered through the configured SMTP sender.",
+        )
+        .replace("<h2>Intended Attachments</h2>", "<h2>Attached CSV Files</h2>")
+        .replace(
+            "These local files would be attached by a future live email sender.",
+            "Attached CSV files.",
+        )
+        .replace(
+            "These files would be attached.",
+            "Attached CSV files.",
+        )
+    )
+
+
+def _plain_text_body(
+    *,
+    run_date: str,
+    output_dir: Path,
+    attachments: tuple[AttachmentManifestItem, ...],
+) -> str:
+    report = _safe_report_contract(output_dir)
+    summary = str(report.get("daily_summary") or f"Daily report for {run_date}.")
+    portfolio_rows = report.get("portfolio_30d_sentiment_table") if isinstance(report.get("portfolio_30d_sentiment_table"), list) else []
+    watchlist_rows = report.get("watchlist_sentiment_table") if isinstance(report.get("watchlist_sentiment_table"), list) else []
+    top_mentions = report.get("top_10_most_mentioned_table") if isinstance(report.get("top_10_most_mentioned_table"), list) else []
+    portfolio_covered = sum(1 for row in portfolio_rows if int(row.get("article_count_30d") or 0) > 0)
+    watchlist_covered = sum(1 for row in watchlist_rows if int(row.get("article_count_30d") or 0) > 0)
+    leaders = ", ".join(
+        f"{row.get('ticker')} ({row.get('mentions')})"
+        for row in top_mentions[:5]
+        if row.get("ticker")
+    ) or "none"
+    attachment_names = ", ".join(item.filename for item in attachments) or "none"
+    return "\n".join(
+        [
+            f"Daily Stock News Sentiment Report - {run_date}",
+            "",
+            summary,
+            "",
+            f"Portfolio coverage: {portfolio_covered} of {len(portfolio_rows)} configured names.",
+            f"Watchlist coverage: {watchlist_covered} of {len(watchlist_rows)} configured names.",
+            f"Top mention leaders: {leaders}.",
+            f"Attachments: {attachment_names}.",
+            "",
+            "The HTML part of this email contains the full report.",
+        ]
+    )
+
+
+def _safe_report_contract(output_dir: Path) -> dict[str, object]:
+    path = output_dir / "report_contract.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    report = payload.get("report") if isinstance(payload, dict) else {}
+    return report if isinstance(report, dict) else {}
 
 
 def _attachment_path(output_dir: Path, name: str) -> Path:

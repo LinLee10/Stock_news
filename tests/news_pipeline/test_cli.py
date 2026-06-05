@@ -326,7 +326,7 @@ class CliTests(unittest.TestCase):
             self.assertTrue(preview_path.is_relative_to(Path(payload["output_dir"])))
             self.assertEqual(payload["email_sending"], "preview_only")
             self.assertEqual(payload["email_delivery_mode"], "local_preview_only")
-            self.assertIn("No SMTP, Gmail, Resend, or other live email provider was contacted.", preview)
+            self.assertIn("Preview only:</strong> no live email provider was contacted.", preview)
             self.assertIn("Daily report for 2026-06-03", preview)
             self.assertIn("Portfolio Recency Sentiment", preview)
             self.assertIn("Watchlist Recency Sentiment", preview)

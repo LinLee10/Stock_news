@@ -25,6 +25,8 @@ from .email_sender import (
     EmailSendError,
     EmailSender,
     LocalPreviewEmailSender,
+    PREVIEW_MODE,
+    REAL_SEND_MODE,
     SmtpEmailSender,
     build_report_email_payload,
 )
@@ -466,6 +468,7 @@ def _send_daily_report(
             attachment_names=attachment_names,
             max_attachment_bytes=max(1, int(args.max_attachment_bytes)),
             max_total_attachment_bytes=max(1, int(args.max_total_attachment_bytes)),
+            delivery_mode=REAL_SEND_MODE if args.confirm_send else PREVIEW_MODE,
         )
     except EmailSendError as error:
         _print_json(
@@ -1509,8 +1512,8 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         "",
         "## Source Quality Summary",
         "",
-        "| Total Articles | Visible Articles | Excluded Articles | Tier 1 | Tier 2 | Tier 3 Visible | Tier 4 Excluded |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Total Articles | Visible Articles | Excluded Articles | Tier 1 | Tier 2 | Tier 3 Visible | Tier 3 Hidden | Tier 4 Excluded | Unknown |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         _markdown_source_quality_summary_row(report.extraction_summary.source_quality_summary),
         "",
         "## Article Extraction Summary",
@@ -1662,13 +1665,14 @@ def _escape_markdown(value: str | None) -> str:
 
 
 def _markdown_source_quality_summary_row(summary: SourceQualitySummary) -> str:
-    tier_counts = summary.visible_tier_counts or summary.tier_counts
     return (
         f"| {summary.total_articles} | {summary.visible_articles} | {summary.excluded_articles} | "
-        f"{int(tier_counts.get('tier_1_high_trust', 0))} | "
-        f"{int(tier_counts.get('tier_2_usable', 0))} | "
-        f"{summary.low_priority_visible_articles} | "
-        f"{int(summary.excluded_tier_counts.get('tier_4_exclude_by_default', 0))} |"
+        f"{summary.tier_1_articles} | "
+        f"{summary.tier_2_articles} | "
+        f"{summary.tier_3_visible_articles} | "
+        f"{summary.tier_3_hidden_articles} | "
+        f"{summary.tier_4_excluded_articles} | "
+        f"{summary.unknown_articles} |"
     )
 
 
