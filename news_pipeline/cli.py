@@ -18,6 +18,16 @@ from .article_fetch import (
 )
 from .dedup import cluster_articles
 from .email_preview import PreviewEmailSender
+from .email_sender import (
+    DEFAULT_EMAIL_ATTACHMENT_NAMES,
+    DEFAULT_MAX_ATTACHMENT_BYTES,
+    DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES,
+    EmailSendError,
+    EmailSender,
+    LocalPreviewEmailSender,
+    SmtpEmailSender,
+    build_report_email_payload,
+)
 from .models import Article, ArticleSource, RunResult, SentimentResult, TickerMention
 from .provider_registry import iter_provider_configs
 from .provider_usage import ProviderUsageRecorder
@@ -85,6 +95,9 @@ def build_parser() -> argparse.ArgumentParser:
             _add_live_article_fetch_args(subparser)
             subparser.add_argument("--run-id")
 
+    send_parser = subcommands.add_parser("send-daily-report")
+    _add_send_daily_report_args(send_parser)
+
     return parser
 
 
@@ -94,11 +107,15 @@ def main(
     fake_providers: Mapping[str, FakeProvider] | None = None,
     provider_checker: ProviderChecker | None = None,
     environ: Mapping[str, str] | None = None,
+    email_sender: EmailSender | None = None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     output_dir = _run_output_dir(args.artifacts_dir, args.run_date)
+    if args.command == "send-daily-report":
+        return _send_daily_report(args, output_dir, environ=environ, email_sender=email_sender)
+
     output_dir.mkdir(parents=True, exist_ok=True)
     context = _safe_context(args)
 
@@ -345,19 +362,127 @@ def _add_live_article_fetch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--fetch-timeout-seconds", type=float, default=DEFAULT_FETCH_TIMEOUT_SECONDS)
 
 
+def _add_send_daily_report_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--run-date", required=True)
+    parser.add_argument("--artifacts-dir", default="artifacts")
+    parser.add_argument("--to")
+    parser.add_argument("--confirm-send", action="store_true", default=False)
+    parser.add_argument("--attachment", action="append", default=None)
+    parser.add_argument("--max-attachment-bytes", type=int, default=DEFAULT_MAX_ATTACHMENT_BYTES)
+    parser.add_argument("--max-total-attachment-bytes", type=int, default=DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES)
+    parser.add_argument("--backend", choices=("smtp",), default="smtp")
+
+
 def _safe_context(args: argparse.Namespace) -> dict[str, object]:
     return {
         "command": args.command,
         "run_date": args.run_date,
-        "dry_run": args.dry_run,
-        "paid_apis_enabled": args.enable_paid_apis,
-        "email_send_enabled": args.enable_email_send,
+        "dry_run": getattr(args, "dry_run", not bool(getattr(args, "confirm_send", False))),
+        "paid_apis_enabled": getattr(args, "enable_paid_apis", False),
+        "email_send_enabled": getattr(args, "enable_email_send", False),
         "live_rss_enabled": bool(getattr(args, "enable_live_rss", False)),
         "live_article_fetch_enabled": bool(getattr(args, "enable_live_article_fetch", False)),
         "fixtures_included": bool(getattr(args, "include_fixtures", False)) or not bool(getattr(args, "enable_live_rss", False)),
         "output_dir": str(_run_output_dir(args.artifacts_dir, args.run_date)),
-        "rss_fixtures_dir": args.rss_fixtures_dir,
+        "rss_fixtures_dir": getattr(args, "rss_fixtures_dir", ""),
     }
+
+
+def _send_daily_report(
+    args: argparse.Namespace,
+    output_dir: Path,
+    *,
+    environ: Mapping[str, str] | None = None,
+    email_sender: EmailSender | None = None,
+) -> int:
+    context = _safe_context(args)
+    recipient = str(args.to or "").strip()
+    if not recipient:
+        _print_json(
+            {
+                **context,
+                "status": "refused",
+                "reason": "missing_recipient",
+                "sent": False,
+                "confirm_send": bool(args.confirm_send),
+            }
+        )
+        return 2
+
+    attachment_names = tuple(DEFAULT_EMAIL_ATTACHMENT_NAMES) + tuple(args.attachment or ())
+    try:
+        payload, manifest = build_report_email_payload(
+            run_date=args.run_date,
+            output_dir=output_dir,
+            recipient=recipient,
+            attachment_names=attachment_names,
+            max_attachment_bytes=max(1, int(args.max_attachment_bytes)),
+            max_total_attachment_bytes=max(1, int(args.max_total_attachment_bytes)),
+        )
+    except EmailSendError as error:
+        _print_json(
+            {
+                **context,
+                "status": "refused",
+                "reason": str(error),
+                "sent": False,
+                "confirm_send": bool(args.confirm_send),
+            }
+        )
+        return 2
+
+    sender: EmailSender
+    if args.confirm_send:
+        sender = email_sender or SmtpEmailSender(environ)
+    else:
+        sender = LocalPreviewEmailSender()
+
+    try:
+        result = sender.send(payload)
+    except EmailSendError as error:
+        _print_json(
+            {
+                **context,
+                "status": "refused",
+                "reason": str(error),
+                "sent": False,
+                "confirm_send": bool(args.confirm_send),
+                "backend": sender.backend_name,
+            }
+        )
+        return 2
+    except Exception as error:
+        _print_json(
+            {
+                **context,
+                "status": "failed",
+                "reason": f"send_failed:{type(error).__name__}",
+                "sent": False,
+                "confirm_send": bool(args.confirm_send),
+                "backend": sender.backend_name,
+            }
+        )
+        return 1
+
+    manifest_output = output_dir / "email_send_manifest.json"
+    safe_payload = {
+        **context,
+        "status": result.status,
+        "send_mode": "confirmed_send" if args.confirm_send else "dry_run_no_send",
+        "confirm_send": bool(args.confirm_send),
+        "would_send": not bool(args.confirm_send),
+        "sent": result.sent,
+        "backend": result.backend,
+        "to": payload.to,
+        "subject": payload.subject,
+        "preview_path": payload.preview_path,
+        "report_artifacts": list(payload.report_artifacts),
+        "attachment_manifest": manifest.as_safe_dict(),
+        "manifest_output": str(manifest_output),
+    }
+    _write_json(manifest_output, safe_payload)
+    _print_json(safe_payload)
+    return 0
 
 
 def _run_output_dir(artifacts_dir: str | Path, run_date: str) -> Path:
