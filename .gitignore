@@ -20,6 +20,9 @@ config/secrets.env
 secrets/development.env
 *.env
 .env
+.env.*
+secrets/*.env
+config/*.env
 
 /secrets/development.env
 /config/secrets.env
