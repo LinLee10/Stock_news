@@ -496,6 +496,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(extractions["attempted_fetches"], 1)
             self.assertEqual(extractions["successful_extractions"], 1)
             self.assertEqual(extractions["records"][0]["extraction_basis"], "full_text")
+            self.assertIn(extractions["records"][0]["extraction_method_used"], {"html_parser", "trafilatura"})
+            self.assertIsNone(extractions["records"][0]["extraction_failure_reason"])
             self.assertTrue(collected["articles"][0]["has_full_text"])
             self.assertEqual(scores[0]["basis"], "full_text")
             self.assertEqual(scores[0]["label"], "negative")
@@ -585,11 +587,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(contract["extraction_summary"]["article_pages_fetched"], 1)
             self.assertEqual(contract["extraction_summary"]["successful_extractions"], 1)
             self.assertEqual(contract["extraction_summary"]["sentiment_basis_counts"]["full_text"], 1)
+            self.assertIn("trafilatura_available", contract["extraction_summary"]["extractor_diagnostics"])
+            self.assertIn("newspaper3k_available", contract["extraction_summary"]["extractor_diagnostics"])
+            self.assertTrue(contract["extraction_summary"]["extractor_diagnostics"]["internal_parser_available"])
+            self.assertTrue(contract["extraction_summary"]["extraction_method_counts"])
+            self.assertIn("extractor_diagnostics", payload)
+            self.assertIn("extraction_method_counts", payload)
             self.assertIn("Article Extraction Summary", markdown)
             self.assertIn("Article Extraction Summary", html)
             self.assertIn("Article Extraction Summary", email_html)
             self.assertIn("Extraction Basis", html)
             self.assertIn("Extraction Basis", email_html)
+            for diagnostic in (
+                "trafilatura_available",
+                "newspaper3k_available",
+                "internal_parser_available",
+                "extraction_method_used",
+                "extraction_failure_reason",
+            ):
+                self.assertIn(diagnostic, markdown)
+                self.assertIn(diagnostic, html)
+                self.assertIn(diagnostic, email_html)
 
 
 def _run_cli(

@@ -298,6 +298,9 @@ def main(
             "snippet_fallbacks": article_fetch_summary.snippet_fallbacks,
             "title_fallbacks": article_fetch_summary.title_fallbacks,
             "top_extraction_failure_reasons": article_fetch_summary.failure_reason_counts,
+            "extraction_method_counts": article_fetch_summary.extraction_method_counts,
+            "extraction_failure_reason": article_fetch_summary.extraction_failure_reason,
+            "extractor_diagnostics": article_fetch_summary.extractor_diagnostics or {},
             "sentiment_basis_counts": sentiment_basis_counts,
             "output_dir": report.output_dir,
             "html_preview_report": report.html_preview_report,
@@ -820,6 +823,8 @@ def _extraction_summary_from_fetch_summary(
             title_fallbacks=article_fetch_summary.title_fallbacks,
             sentiment_basis_counts=sentiment_basis_counts,
             top_extraction_failure_reasons=article_fetch_summary.failure_reason_counts,
+            extraction_method_counts=article_fetch_summary.extraction_method_counts,
+            extraction_failure_reason=article_fetch_summary.extraction_failure_reason,
             extractor_diagnostics=article_fetch_summary.extractor_diagnostics or {},
         )
     fetched_count = sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0))
@@ -832,6 +837,8 @@ def _extraction_summary_from_fetch_summary(
         snippet_fallbacks=sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "snippet"),
         title_fallbacks=sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "title"),
         sentiment_basis_counts=sentiment_basis_counts,
+        extraction_method_counts=_stored_extraction_method_counts(extractions_by_article),
+        extraction_failure_reason=_stored_extraction_failure_reason(extractions_by_article),
     )
 
 
@@ -1007,6 +1014,8 @@ def _persist_article_extractions(
             text_hash=record.text_hash,
             extracted_preview=record.extracted_preview,
             extractor=record.extractor,
+            extraction_method_used=record.extraction_method_used,
+            extraction_failure_reason=record.extraction_failure_reason,
             fetched=record.fetched,
             tickers=record.tickers,
         )
@@ -1070,6 +1079,28 @@ def _score_dict_basis_counts(scores: Sequence[Mapping[str, object]]) -> dict[str
         if basis in counts:
             counts[basis] += 1
     return counts
+
+
+def _stored_extraction_method_counts(extractions_by_article: Mapping[str, Mapping[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in extractions_by_article.values():
+        method = str(row.get("extraction_method_used") or row.get("extractor") or "")
+        if not method:
+            continue
+        counts[method] = counts.get(method, 0) + 1
+    return counts
+
+
+def _stored_extraction_failure_reason(extractions_by_article: Mapping[str, Mapping[str, object]]) -> str | None:
+    counts: dict[str, int] = {}
+    for row in extractions_by_article.values():
+        reason = str(row.get("extraction_failure_reason") or row.get("error_class") or "")
+        if not reason:
+            continue
+        counts[reason] = counts.get(reason, 0) + 1
+    if not counts:
+        return None
+    return sorted(counts.items(), key=lambda item: (-int(item[1]), item[0]))[0][0]
 
 
 def _article_text(article: Article) -> str:
@@ -1269,6 +1300,10 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         "| ---: | ---: | ---: | --- | --- | --- |",
         _markdown_extractor_status_row(report.extraction_summary),
         "",
+        "| Extraction Diagnostic | Value |",
+        "| --- | --- |",
+        *_markdown_extraction_diagnostic_rows(report.extraction_summary),
+        "",
         *_markdown_failure_reason_rows(report.extraction_summary),
         "",
         *_markdown_recency_sections(report),
@@ -1422,6 +1457,17 @@ def _markdown_extractor_status_row(summary: ExtractionSummary) -> str:
     )
 
 
+def _markdown_extraction_diagnostic_rows(summary: ExtractionSummary) -> list[str]:
+    diagnostics = summary.extractor_diagnostics
+    return [
+        f"| trafilatura_available | {_availability(diagnostics.get('trafilatura_available'))} |",
+        f"| newspaper3k_available | {_availability(diagnostics.get('newspaper3k_available'))} |",
+        f"| internal_parser_available | {_availability(diagnostics.get('internal_parser_available'))} |",
+        f"| extraction_method_used | {_escape_markdown(_method_counts(summary.extraction_method_counts))} |",
+        f"| extraction_failure_reason | {_escape_markdown(summary.extraction_failure_reason or 'none')} |",
+    ]
+
+
 def _markdown_failure_reason_rows(summary: ExtractionSummary) -> list[str]:
     lines = [
         "### Top Extraction Failure Reasons",
@@ -1444,6 +1490,15 @@ def _markdown_failure_reason_rows(summary: ExtractionSummary) -> list[str]:
 
 def _availability(value: bool | None) -> str:
     return "available" if value else "missing"
+
+
+def _method_counts(counts: Mapping[str, int]) -> str:
+    if not counts:
+        return "none"
+    return ", ".join(
+        f"{method}={int(count)}"
+        for method, count in sorted(counts.items(), key=lambda item: (-int(item[1]), item[0]))
+    )
 
 
 def _markdown_recency_sections(report: DailyReportContract) -> list[str]:

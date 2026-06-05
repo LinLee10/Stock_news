@@ -164,6 +164,8 @@ class SQLiteStore:
                 text_hash TEXT,
                 extracted_preview TEXT,
                 extractor TEXT,
+                extraction_method_used TEXT,
+                extraction_failure_reason TEXT,
                 fetched INTEGER NOT NULL DEFAULT 0,
                 tickers_json TEXT NOT NULL DEFAULT '[]',
                 UNIQUE(run_id, article_id)
@@ -187,6 +189,8 @@ class SQLiteStore:
         self._ensure_column("dedupe_clusters", "publisher_names_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("dedupe_clusters", "source_providers_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("dedupe_clusters", "supporting_links_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("article_extractions", "extraction_method_used", "TEXT")
+        self._ensure_column("article_extractions", "extraction_failure_reason", "TEXT")
         self._ensure_column("article_extractions", "tickers_json", "TEXT NOT NULL DEFAULT '[]'")
         self.connection.commit()
 
@@ -491,6 +495,8 @@ class SQLiteStore:
         text_hash: str | None = None,
         extracted_preview: str | None = None,
         extractor: str | None = None,
+        extraction_method_used: str | None = None,
+        extraction_failure_reason: str | None = None,
         fetched: bool = False,
         tickers: Iterable[str] = (),
     ) -> int:
@@ -499,9 +505,10 @@ class SQLiteStore:
             INSERT OR REPLACE INTO article_extractions (
                 run_id, article_id, canonical_url, extraction_status, extraction_basis,
                 error_class, final_url, latency_ms, content_type, content_length,
-                text_hash, extracted_preview, extractor, fetched, tickers_json
+                text_hash, extracted_preview, extractor, extraction_method_used,
+                extraction_failure_reason, fetched, tickers_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -517,6 +524,8 @@ class SQLiteStore:
                 text_hash,
                 extracted_preview,
                 extractor,
+                extraction_method_used,
+                extraction_failure_reason,
                 1 if fetched else 0,
                 json.dumps(list(tickers), sort_keys=True),
             ),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 import importlib.util
 import json
@@ -36,6 +36,14 @@ class ExtractionResult:
     def error(self) -> str | None:
         return self.extraction_error
 
+    @property
+    def extraction_method_used(self) -> str:
+        return self.extractor
+
+    @property
+    def extraction_failure_reason(self) -> str | None:
+        return self.extraction_error
+
 
 def extract_article(
     *,
@@ -46,23 +54,15 @@ def extract_article(
 ) -> ExtractionResult:
     """Extract article fields from provided HTML without fetching a URL."""
     errors: list[str] = []
-    dependency_status = extraction_dependency_status()
-    if not dependency_status["trafilatura_available"] or not dependency_status["newspaper3k_available"]:
-        errors.append("optional_extractors_unavailable")
-
-    for extractor_name, extractor in (
-        ("trafilatura", _extract_with_trafilatura),
-        ("newspaper3k", _extract_with_newspaper),
-    ):
-        try:
-            result = extractor(raw_html=raw_html, url=url)
-        except Exception as exc:
-            errors.append(f"{extractor_name}: {exc.__class__.__name__}")
-            continue
+    try:
+        result = _extract_with_trafilatura(raw_html=raw_html, url=url)
+    except Exception as exc:
+        errors.append(f"trafilatura: {exc.__class__.__name__}")
+    else:
         if result and result.main_text.strip():
-            return result
+            return _with_metadata_fallback(result=result, raw_html=raw_html, url=url, title=title)
         if result and result.extraction_error:
-            errors.append(f"{extractor_name}: {result.extraction_error}")
+            errors.append(f"trafilatura: {result.extraction_error}")
 
     parsed = _extract_with_html_parser(raw_html=raw_html, url=url)
     if parsed.main_text.strip():
@@ -155,6 +155,8 @@ def choose_extraction_basis(
 
 
 def _extract_with_trafilatura(*, raw_html: str, url: str) -> ExtractionResult | None:
+    if importlib.util.find_spec("trafilatura") is None:
+        return None
     try:
         import trafilatura  # type: ignore
     except ImportError:
@@ -191,29 +193,22 @@ def _extract_with_trafilatura(*, raw_html: str, url: str) -> ExtractionResult | 
     )
 
 
-def _extract_with_newspaper(*, raw_html: str, url: str) -> ExtractionResult | None:
-    try:
-        from newspaper import Article as NewspaperArticle  # type: ignore
-    except ImportError:
-        return None
+def _with_metadata_fallback(
+    *,
+    result: ExtractionResult,
+    raw_html: str,
+    url: str,
+    title: str | None,
+) -> ExtractionResult:
+    if result.title and result.publish_date and result.author:
+        return result
 
-    article = NewspaperArticle(url=url)
-    article.set_html(raw_html)
-    article.parse()
-    text = (article.text or "").strip()
-    if not text:
-        return None
-    publish_date = article.publish_date.isoformat() if article.publish_date else None
-    author = ", ".join(article.authors) if article.authors else None
-    return ExtractionResult(
-        title=article.title or None,
-        main_text=text,
-        publish_date=publish_date,
-        author=author,
-        extraction_status="success",
-        extraction_basis="full_text",
-        extractor="newspaper3k",
-        url=url,
+    parsed = _extract_with_html_parser(raw_html=raw_html, url=url)
+    return replace(
+        result,
+        title=result.title or _first_present(title, parsed.title),
+        publish_date=result.publish_date or parsed.publish_date,
+        author=result.author or parsed.author,
     )
 
 
@@ -286,6 +281,13 @@ class _ArticleHTMLParser(HTMLParser):
 
 def _collapse_ws(value: str) -> str:
     return " ".join(value.split())
+
+
+def _first_present(*values: str | None) -> str | None:
+    for value in values:
+        if value and value.strip():
+            return value.strip()
+    return None
 
 
 def _newspaper3k_available() -> bool:

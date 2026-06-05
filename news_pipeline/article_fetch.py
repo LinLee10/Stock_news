@@ -48,6 +48,8 @@ class ArticleExtractionRecord:
     text_hash: str | None
     extracted_preview: str | None
     extractor: str | None
+    extraction_method_used: str | None
+    extraction_failure_reason: str | None
     fetched: bool
     tickers: tuple[str, ...]
 
@@ -72,6 +74,8 @@ class ArticleExtractionRecord:
             "text_hash": self.text_hash,
             "extracted_preview": self.extracted_preview,
             "extractor": self.extractor,
+            "extraction_method_used": self.extraction_method_used,
+            "extraction_failure_reason": self.extraction_failure_reason,
             "fetched": self.fetched,
             "tickers": list(self.tickers),
         }
@@ -128,6 +132,23 @@ class ArticleFetchSummary:
                 counts[reason] = counts.get(reason, 0) + 1
         return counts
 
+    @property
+    def extraction_method_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in self.records:
+            method = record.extraction_method_used
+            if not method:
+                continue
+            counts[method] = counts.get(method, 0) + 1
+        return counts
+
+    @property
+    def extraction_failure_reason(self) -> str | None:
+        reasons = self.failure_reason_counts
+        if not reasons:
+            return None
+        return sorted(reasons.items(), key=lambda item: (-int(item[1]), item[0]))[0][0]
+
     def as_dict(self) -> dict[str, object]:
         return {
             "enabled": self.enabled,
@@ -145,6 +166,8 @@ class ArticleFetchSummary:
             "snippet_fallbacks": self.snippet_fallbacks,
             "title_fallbacks": self.title_fallbacks,
             "top_extraction_failure_reasons": self.failure_reason_counts,
+            "extraction_method_counts": self.extraction_method_counts,
+            "extraction_failure_reason": self.extraction_failure_reason,
             "extractor_diagnostics": self.extractor_diagnostics or extraction_dependency_status(),
             "records": [record.as_dict() for record in self.records],
         }
@@ -410,6 +433,7 @@ def _fetch_and_extract(
         text = result.main_text.strip()
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None
         failure_reasons = _failure_reasons(result.extraction_basis, result.extraction_error)
+        extraction_failure_reason = result.extraction_failure_reason or _primary_failure_reason(failure_reasons)
         record = ArticleExtractionRecord(
             article_id=article.article_id,
             canonical_url=article.canonical_url,
@@ -430,6 +454,8 @@ def _fetch_and_extract(
             text_hash=text_hash,
             extracted_preview=_preview(text),
             extractor=result.extractor,
+            extraction_method_used=result.extraction_method_used,
+            extraction_failure_reason=extraction_failure_reason,
             fetched=True,
             tickers=tickers,
         )
@@ -458,6 +484,8 @@ def _fetch_and_extract(
             text_hash=None,
             extracted_preview=None,
             extractor=None,
+            extraction_method_used=None,
+            extraction_failure_reason=_primary_failure_reason(_normalize_reasons(("fetch_error", type(exc).__name__, _fallback_reason(article)))),
             fetched=True,
             tickers=tickers,
         )
@@ -597,6 +625,8 @@ def _skipped_record(
         text_hash=None,
         extracted_preview=None,
         extractor=None,
+        extraction_method_used=None,
+        extraction_failure_reason=_primary_failure_reason(failure_reasons),
         fetched=False,
         tickers=tickers,
     )
@@ -638,6 +668,8 @@ def _fetched_failure_record(
         text_hash=None,
         extracted_preview=None,
         extractor=None,
+        extraction_method_used=None,
+        extraction_failure_reason=_primary_failure_reason(failure_reasons),
         fetched=True,
         tickers=tickers,
     )

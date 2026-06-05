@@ -135,17 +135,31 @@ def _extraction_summary(report: DailyReportContract) -> str:
             "</tr>",
             "    </table>",
             "    <table>",
-            "      <tr><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th><th>Trafilatura</th><th>Newspaper3k</th><th>Internal Parser</th></tr>",
+            "      <tr><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th></tr>",
             "      <tr>"
             f"<td class=\"num\">{basis_counts['full_text']}</td>"
             f"<td class=\"num\">{basis_counts['snippet']}</td>"
             f"<td class=\"num\">{basis_counts['title']}</td>"
-            f"<td>{escape(_availability(summary.extractor_diagnostics.get('trafilatura_available')))}</td>"
-            f"<td>{escape(_availability(summary.extractor_diagnostics.get('newspaper3k_available')))}</td>"
-            f"<td>{escape(_availability(summary.extractor_diagnostics.get('internal_parser_available')))}</td>"
             "</tr>",
             "    </table>",
+            _extraction_diagnostics(summary),
             _failure_reasons(summary.top_extraction_failure_reasons),
+        ]
+    )
+
+
+def _extraction_diagnostics(summary) -> str:
+    diagnostics = summary.extractor_diagnostics
+    return "\n".join(
+        [
+            "    <table>",
+            "      <tr><th>Extraction Diagnostic</th><th>Value</th></tr>",
+            f"      <tr><td>trafilatura_available</td><td>{escape(_availability(diagnostics.get('trafilatura_available')))}</td></tr>",
+            f"      <tr><td>newspaper3k_available</td><td>{escape(_availability(diagnostics.get('newspaper3k_available')))}</td></tr>",
+            f"      <tr><td>internal_parser_available</td><td>{escape(_availability(diagnostics.get('internal_parser_available')))}</td></tr>",
+            f"      <tr><td>extraction_method_used</td><td>{escape(_method_counts(summary.extraction_method_counts))}</td></tr>",
+            f"      <tr><td>extraction_failure_reason</td><td>{escape(summary.extraction_failure_reason or 'none')}</td></tr>",
+            "    </table>",
         ]
     )
 
@@ -169,6 +183,15 @@ def _failure_reasons(reasons) -> str:
 
 def _availability(value) -> str:
     return "available" if value else "missing"
+
+
+def _method_counts(counts) -> str:
+    if not counts:
+        return "none"
+    return ", ".join(
+        f"{method}={int(count)}"
+        for method, count in sorted(counts.items(), key=lambda item: (-int(item[1]), item[0]))
+    )
 
 
 def _recency_sections(report: DailyReportContract) -> str:

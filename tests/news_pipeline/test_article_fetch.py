@@ -122,10 +122,12 @@ class ArticleFetchTests(unittest.TestCase):
             _enriched, summary = fetch_top_cluster_articles((_cluster(direct, (direct,)),), run_date="2026-06-04")
 
         record = summary.records[0]
-        self.assertEqual(record.error_class, "optional_extractors_unavailable")
+        self.assertEqual(record.error_class, "no_article_body")
         self.assertIn("no_article_body", record.failure_reasons)
         self.assertIn("snippet_fallback", record.failure_reasons)
         self.assertEqual(record.extraction_basis, "snippet")
+        self.assertEqual(record.extraction_method_used, "fallback")
+        self.assertIn("no_article_body", record.extraction_failure_reason)
 
     def test_unsupported_content_type_is_recorded_explicitly(self):
         direct = _article("https://publisher.example.com/file.pdf", "NVIDIA pdf", snippet="NVIDIA snippet text.")
@@ -147,6 +149,20 @@ class ArticleFetchTests(unittest.TestCase):
         record = summary.records[0]
         self.assertEqual(record.extraction_basis, "title")
         self.assertIn("title_fallback", record.failure_reasons)
+
+    def test_extraction_record_includes_explicit_method_and_failure_diagnostics(self):
+        direct = _article("https://publisher.example.com/nvidia", "NVIDIA publisher")
+        with patch("news_pipeline.article_fetch.urlopen", return_value=_html_response(direct.canonical_url)):
+            _enriched, summary = fetch_top_cluster_articles((_cluster(direct, (direct,)),), run_date="2026-06-04")
+
+        record = summary.records[0]
+        payload = summary.as_dict()
+        self.assertEqual(record.extraction_basis, "full_text")
+        self.assertIn(record.extraction_method_used, {"html_parser", "trafilatura"})
+        self.assertIsNone(record.extraction_failure_reason)
+        self.assertIn("extraction_method_used", payload["records"][0])
+        self.assertIn("extraction_failure_reason", payload["records"][0])
+        self.assertIn("extraction_method_counts", payload)
 
 
 def _article(url, title, *, snippet="NVIDIA stock news.", provider="google_news_rss_search", source="Google News"):
