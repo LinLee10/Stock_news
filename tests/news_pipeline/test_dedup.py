@@ -200,6 +200,90 @@ class DedupTests(unittest.TestCase):
 
         self.assertEqual(len(clusters), 2)
 
+    def test_micron_buy_opinion_does_not_merge_with_micron_crash_event(self):
+        clusters = cluster_articles(
+            [
+                Article(
+                    canonical_url="https://publisher-a.com/micron-buy-before-june",
+                    title="Should You Buy Micron Stock Before June 24? History Has a Clear Answer.",
+                    snippet="Micron stock opinion before upcoming events.",
+                    published_at="2026-06-04T10:00:00+00:00",
+                ),
+                Article(
+                    canonical_url="https://publisher-b.com/micron-crash-today",
+                    title="Why Micron Stock Crashed Today",
+                    snippet="Micron shares dropped after semiconductor market news.",
+                    published_at="2026-06-04T10:15:00+00:00",
+                ),
+            ]
+        )
+
+        self.assertEqual(len(clusters), 2)
+
+    def test_same_ticker_earnings_duplicate_across_publishers_merges(self):
+        clusters = cluster_articles(
+            [
+                Article(
+                    canonical_url="https://publisher-a.com/micron-earnings",
+                    title="Micron beats earnings estimates after strong memory demand",
+                    snippet="Micron quarterly results topped expectations.",
+                    published_at="2026-06-04T10:00:00+00:00",
+                    metadata={"provider": "google_news_rss_search", "source_name": "Publisher A"},
+                ),
+                Article(
+                    canonical_url="https://publisher-b.com/micron-results",
+                    title="Micron beats earnings estimates on strong memory demand",
+                    snippet="Micron quarterly results topped expectations.",
+                    published_at="2026-06-04T10:20:00+00:00",
+                    metadata={"provider": "yahoo_finance_rss", "source_name": "Publisher B"},
+                ),
+            ]
+        )
+
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0].duplicate_reasons, ("similar_title",))
+
+    def test_similar_ai_chip_announcement_across_publishers_merges(self):
+        clusters = cluster_articles(
+            [
+                Article(
+                    canonical_url="https://publisher-a.com/nvidia-ai-chip",
+                    title="NVIDIA unveils new AI chip for data centers",
+                    published_at="2026-06-04T10:00:00+00:00",
+                    metadata={"provider": "google_news_rss_search", "source_name": "Publisher A"},
+                ),
+                Article(
+                    canonical_url="https://publisher-b.com/nvidia-ai-chip",
+                    title="Nvidia unveils new AI chip for data centres",
+                    published_at="2026-06-04T10:05:00+00:00",
+                    metadata={"provider": "cnbc_rss", "source_name": "Publisher B"},
+                ),
+            ]
+        )
+
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0].duplicate_reasons, ("similar_title",))
+
+    def test_analyst_upgrade_does_not_merge_with_product_announcement(self):
+        clusters = cluster_articles(
+            [
+                Article(
+                    canonical_url="https://publisher-a.com/nvidia-analyst-upgrade",
+                    title="NVIDIA stock upgraded as analyst raises price target",
+                    snippet="Analyst rating update for NVDA shares.",
+                    published_at="2026-06-04T10:00:00+00:00",
+                ),
+                Article(
+                    canonical_url="https://publisher-b.com/nvidia-ai-chip",
+                    title="NVIDIA unveils new AI chip platform for data centers",
+                    snippet="Product announcement for NVDA hardware.",
+                    published_at="2026-06-04T10:10:00+00:00",
+                ),
+            ]
+        )
+
+        self.assertEqual(len(clusters), 2)
+
     def test_supporting_links_preserve_publisher_and_provider_names(self):
         clusters = cluster_articles(
             [

@@ -55,6 +55,122 @@ TITLE_STOPWORDS = {
     "to",
     "with",
 }
+EVENT_TYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "earnings_results": (
+        "earnings",
+        "results",
+        "quarter",
+        "quarterly",
+        "revenue",
+        "profit",
+        "eps",
+        "guidance",
+        "sales",
+    ),
+    "analyst_rating_price_target": (
+        "analyst",
+        "rating",
+        "ratings",
+        "upgrade",
+        "upgrades",
+        "downgrade",
+        "downgrades",
+        "price target",
+        "target",
+        "initiates",
+        "coverage",
+        "opinion",
+        "opinions",
+    ),
+    "stock_move": (
+        "crash",
+        "crashed",
+        "drop",
+        "dropped",
+        "down",
+        "fall",
+        "fell",
+        "plunge",
+        "plunges",
+        "rally",
+        "rallies",
+        "rise",
+        "rises",
+        "rose",
+        "sink",
+        "sinks",
+        "soar",
+        "soars",
+        "surge",
+        "surges",
+        "up",
+        "jumps",
+        "popped",
+        "tumbling",
+    ),
+    "product_ai_announcement": (
+        "ai",
+        "artificial intelligence",
+        "chip",
+        "chips",
+        "product",
+        "platform",
+        "launch",
+        "launches",
+        "unveils",
+        "announces",
+        "architecture",
+    ),
+    "partnership_contract": (
+        "partnership",
+        "partner",
+        "contract",
+        "customer",
+        "deal with",
+        "collaboration",
+    ),
+    "acquisition_deal": (
+        "acquisition",
+        "acquire",
+        "acquires",
+        "buyout",
+        "merger",
+        "takeover",
+    ),
+    "regulatory_legal": (
+        "lawsuit",
+        "legal",
+        "regulatory",
+        "regulator",
+        "probe",
+        "investigation",
+        "antitrust",
+        "senate",
+        "court",
+    ),
+    "general_buy_sell_opinion": (
+        "buy",
+        "sell",
+        "hold",
+        "should you",
+        "best stocks",
+        "stock to buy",
+        "is it time",
+        "before",
+        "recommend",
+        "undervalued",
+        "overweight",
+        "valuation",
+    ),
+}
+CONFLICTING_EVENT_TYPES = {
+    frozenset(("general_buy_sell_opinion", "stock_move")),
+    frozenset(("analyst_rating_price_target", "product_ai_announcement")),
+    frozenset(("analyst_rating_price_target", "regulatory_legal")),
+    frozenset(("product_ai_announcement", "regulatory_legal")),
+    frozenset(("earnings_results", "regulatory_legal")),
+    frozenset(("acquisition_deal", "regulatory_legal")),
+}
 
 
 SemanticSimilarity = Callable[[Article, Article], float | None]
@@ -232,12 +348,18 @@ def _duplicate_reason(
         return "exact_url"
     if normalize_title(article.title) == normalize_title(canonical.title):
         return "exact_title"
-    if _ticker_sets_compatible(article, canonical) and title_similarity(article.title, canonical.title) >= title_threshold:
+    similarity = title_similarity(article.title, canonical.title)
+    if (
+        _ticker_sets_compatible(article, canonical)
+        and _event_types_compatible(article, canonical, similarity)
+        and similarity >= title_threshold
+    ):
         return "similar_title"
     if (
         _ticker_sets_compatible(article, canonical)
+        and _event_types_compatible(article, canonical, similarity)
         and _same_ticker_near_publish_date(article, canonical)
-        and title_similarity(article.title, canonical.title) >= 0.55
+        and similarity >= 0.72
     ):
         return "same_ticker_near_publish_date"
     if semantic_similarity is not None:
@@ -309,6 +431,35 @@ def _ticker_sets_compatible(article: Article, canonical: Article) -> bool:
     article_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(article))}
     canonical_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(canonical))}
     return not article_tickers or not canonical_tickers or bool(article_tickers & canonical_tickers)
+
+
+def _event_types_compatible(article: Article, canonical: Article, similarity: float) -> bool:
+    article_types = event_types_for_title(article.title)
+    canonical_types = event_types_for_title(canonical.title)
+    if not article_types or not canonical_types:
+        return True
+    if article_types & canonical_types:
+        return True
+    if similarity >= 0.94:
+        return True
+    return not any(frozenset((left, right)) in CONFLICTING_EVENT_TYPES for left in article_types for right in canonical_types)
+
+
+def event_types_for_title(title: str) -> frozenset[str]:
+    normalized = normalize_title(title)
+    event_types = {
+        event_type
+        for event_type, keywords in EVENT_TYPE_KEYWORDS.items()
+        if any(_contains_keyword(normalized, keyword) for keyword in keywords)
+    }
+    return frozenset(event_types)
+
+
+def _contains_keyword(normalized_title: str, keyword: str) -> bool:
+    keyword = normalize_title(keyword)
+    if not keyword:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", normalized_title) is not None
 
 
 def _parse_date(value: str | None) -> datetime | None:
