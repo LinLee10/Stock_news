@@ -206,7 +206,7 @@ class EmailSenderCliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         text = fake_sender.sent_payloads[0].plain_text_body
-        self.assertIn("Daily Stock News Sentiment Report - 2026-06-03", text)
+        self.assertIn("Portfolio and Watchlist Market Briefing - 2026-06-03", text)
         self.assertIn("Portfolio coverage: 1 of 2 configured names.", text)
         self.assertIn("Watchlist coverage: 1 of 1 configured names.", text)
         self.assertIn("Top mention leaders: NVDA (3).", text)

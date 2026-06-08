@@ -70,6 +70,7 @@ from .sources.rss_config import (
 )
 from .sources.rss import RssSource
 from .storage import SQLiteStore, initialize_database
+from .summaries import MarketIntelligence, build_market_intelligence
 from .tickers import TrackedTicker, load_portfolio, load_tracked_tickers, load_watchlist, match_tickers
 
 
@@ -285,6 +286,11 @@ def main(
                 _enriched_article(cluster.canonical_article, enriched_articles_by_url)
                 for cluster in clusters
             ]
+            market_intelligence = build_market_intelligence(
+                articles=articles_for_storage,
+                clusters=clusters,
+                run_date=args.run_date,
+            )
             persisted_article_ids = _persist_run_articles(store, run_id, articles_for_storage)
             scores = _score_articles(canonical_articles)
             sentiment_basis_counts = _score_dict_basis_counts(scores)
@@ -311,6 +317,7 @@ def main(
                     source_quality_summary=source_quality_filter.summary,
                     data_source_label=_data_source_label(args),
                     show_excluded_source_diagnostics=args.show_excluded_source_diagnostics,
+                    market_intelligence=market_intelligence,
                 ),
                 artifacts_dir=args.artifacts_dir,
             )
@@ -749,6 +756,12 @@ def _dataclass_to_dict(value: object) -> dict[str, object]:
 
 def _daily_report_input(run_date: str, articles: Sequence[Article]) -> DailyReportInput:
     scored_articles = _scored_articles_by_ticker(articles)
+    clusters = cluster_articles(articles)
+    market_intelligence = build_market_intelligence(
+        articles=articles,
+        clusters=clusters,
+        run_date=run_date,
+    )
     article_links = {
         ticker.symbol: tuple(
             ArticleLink(
@@ -812,6 +825,16 @@ def _daily_report_input(run_date: str, articles: Sequence[Article]) -> DailyRepo
             if scored_articles.get(ticker.symbol)
         ),
         article_links_by_ticker=article_links,
+        portfolio_summaries=tuple(
+            market_intelligence.ticker_summaries[ticker.symbol]
+            for ticker in load_portfolio()
+        ),
+        watchlist_summaries=tuple(
+            market_intelligence.ticker_summaries[ticker.symbol]
+            for ticker in load_watchlist()
+        ),
+        ranked_reads_by_ticker=market_intelligence.ranked_reads_by_ticker,
+        article_summaries=market_intelligence.article_summaries,
         data_source_label="local RSS fixtures",
     )
 
@@ -824,6 +847,7 @@ def _daily_report_input_from_store(
     source_quality_summary: SourceQualitySummary | None = None,
     data_source_label: str = "local RSS fixtures",
     show_excluded_source_diagnostics: bool = False,
+    market_intelligence: MarketIntelligence | None = None,
 ) -> DailyReportInput:
     articles_by_id = {str(row["article_id"]): row for row in store.list_run_articles(run_id)}
     sources_by_article: dict[str, dict[str, object]] = {}
@@ -860,7 +884,12 @@ def _daily_report_input_from_store(
             }
         )
 
-    event_clusters_by_ticker = _event_clusters_by_ticker_from_store(store, run_id, extractions_by_article)
+    event_clusters_by_ticker = _event_clusters_by_ticker_from_store(
+        store,
+        run_id,
+        extractions_by_article,
+        market_intelligence=market_intelligence,
+    )
     article_links = _article_links_from_event_clusters(event_clusters_by_ticker)
     portfolio_rows = tuple(
         _sentiment_row_from_stored(ticker, mentions_by_ticker.get(ticker.symbol, ()), event_clusters_by_ticker.get(ticker.symbol, ()))
@@ -901,6 +930,20 @@ def _daily_report_input_from_store(
         ),
         article_links_by_ticker=article_links,
         event_clusters_by_ticker=event_clusters_by_ticker,
+        portfolio_summaries=tuple(
+            market_intelligence.ticker_summaries[ticker.symbol]
+            for ticker in load_portfolio()
+        )
+        if market_intelligence
+        else (),
+        watchlist_summaries=tuple(
+            market_intelligence.ticker_summaries[ticker.symbol]
+            for ticker in load_watchlist()
+        )
+        if market_intelligence
+        else (),
+        ranked_reads_by_ticker=market_intelligence.ranked_reads_by_ticker if market_intelligence else {},
+        article_summaries=market_intelligence.article_summaries if market_intelligence else (),
         extraction_summary=_extraction_summary_from_fetch_summary(
             article_fetch_summary,
             extractions_by_article,
@@ -916,6 +959,8 @@ def _event_clusters_by_ticker_from_store(
     store: SQLiteStore,
     run_id: str,
     extractions_by_article: Mapping[str, Mapping[str, object]] | None = None,
+    *,
+    market_intelligence: MarketIntelligence | None = None,
 ) -> dict[str, tuple[EventClusterRow, ...]]:
     grouped: dict[str, list[EventClusterRow]] = {ticker.symbol: [] for ticker in load_tracked_tickers()}
     extractions_by_article = extractions_by_article or {}
@@ -973,6 +1018,11 @@ def _event_clusters_by_ticker_from_store(
         if not tickers:
             tickers = match_tickers(" ".join(link.title for link in supporting_links[:3]))
         for ticker in tickers:
+            intelligence = (
+                market_intelligence.cluster_intelligence.get((ticker.symbol, event.title))
+                if market_intelligence
+                else None
+            )
             grouped.setdefault(ticker.symbol, []).append(
                 EventClusterRow(
                     ticker=ticker.symbol,
@@ -989,11 +1039,28 @@ def _event_clusters_by_ticker_from_store(
                     weighted_cluster_sentiment=event.weighted_cluster_sentiment,
                     extraction_basis=event.extraction_basis,
                     source_quality_label=event.source_quality_label,
+                    cluster_summary=intelligence.cluster_summary if intelligence else event.title,
+                    cluster_summary_basis=intelligence.cluster_summary_basis if intelligence else event.extraction_basis,
+                    cluster_reading_priority=(
+                        intelligence.cluster_reading_priority if intelligence else "background_only"
+                    ),
+                    ranking_score=intelligence.ranking_score if intelligence else 0.0,
                     supporting_links=event.supporting_links,
                 )
             )
     return {
-        symbol: tuple(sorted(rows, key=lambda event: (event.source_quality_label, -event.publisher_count, -event.article_count, event.title))[:10])
+        symbol: tuple(
+            sorted(
+                rows,
+                key=lambda event: (
+                    -event.ranking_score,
+                    event.source_quality_label,
+                    -event.publisher_count,
+                    -event.article_count,
+                    event.title,
+                ),
+            )[:10]
+        )
         for symbol, rows in grouped.items()
     }
 
@@ -1502,35 +1569,25 @@ def _write_markdown_report(report: DailyReportContract) -> str:
     output_dir = Path(report.output_dir)
     report_path = output_dir / "daily_report.md"
     lines = [
-        f"# Daily News Pipeline Dry Run - {report.report_date}",
+        f"# Portfolio and Watchlist Market Briefing - {report.report_date}",
+        "",
+        "Sentiment is deterministic placeholder logic until a stronger model is wired in. "
+        "Summaries are generated from extracted full text when available, otherwise snippets or titles. "
+        "Direction rows are not predictions. This report is not investment advice.",
         "",
         f"Data source: {report.data_source_label}. No paid APIs were called and no email was sent.",
         "",
-        "Sentiment is deterministic placeholder logic, and watchlist direction rows are not real predictions. This report is not investment advice.",
-        "",
         report.daily_summary,
         "",
-        "## Source Quality Summary",
+        *_markdown_daily_briefing(report),
         "",
-        "| Total Articles | Visible Articles | Excluded Articles | Tier 1 | Tier 2 | Tier 3 Visible | Tier 3 Hidden | Tier 4 Excluded | Unknown |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-        _markdown_source_quality_summary_row(report.extraction_summary.source_quality_summary),
+        *_markdown_ticker_summaries("Portfolio Summary", report.portfolio_summaries),
         "",
-        "## Article Extraction Summary",
+        *_markdown_ticker_summaries("Watchlist Summary", report.watchlist_summaries),
         "",
-        "| Article Fetch Attempts | Publisher Article Fetches | Google Wrappers Skipped | Google Wrappers Resolved | Full Text Successes | Snippet Fallbacks | Title Fallbacks |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-        _markdown_extraction_summary_row(report.extraction_summary),
+        *_markdown_stories_to_watch(report),
         "",
-        "| Full Text Basis | Snippet Basis | Title Basis | Trafilatura | Newspaper3k | Internal Parser |",
-        "| ---: | ---: | ---: | --- | --- | --- |",
-        _markdown_extractor_status_row(report.extraction_summary),
-        "",
-        "| Extraction Diagnostic | Value |",
-        "| --- | --- |",
-        *_markdown_extraction_diagnostic_rows(report.extraction_summary),
-        "",
-        *_markdown_failure_reason_rows(report.extraction_summary),
+        *_markdown_ranked_reads(report),
         "",
         *_markdown_recency_sections(report),
         "",
@@ -1619,28 +1676,94 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         )
     else:
         lines.append("| none | none | 0 | 0 | no emerging watchlist names in current report data |")
-    lines.extend(["", "## Top Event Clusters By Recency And Source Diversity", ""])
-    event_written = False
+    lines.extend(["", *_markdown_read_more(report), "", *_markdown_diagnostics(report)])
+    report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return str(report_path)
+
+
+def _markdown_daily_briefing(report: DailyReportContract) -> list[str]:
+    bullets = []
+    if report.top_10_most_mentioned_table:
+        leader = report.top_10_most_mentioned_table[0]
+        bullets.append(f"Top mention leader: {leader.ticker} with {leader.mentions} current report mention(s).")
+    for cluster in report.top_event_clusters[:2]:
+        bullets.append(cluster.cluster_summary or f"{cluster.ticker}: {cluster.title}")
+    bullets.append(
+        f"Full text extraction succeeded for {report.extraction_summary.successful_extractions} article(s); "
+        "remaining summaries use snippets or titles."
+    )
+    bullets.append("Direction rows are not predictions.")
+    return ["## Daily Briefing", "", *[f"- {bullet}" for bullet in bullets[:5]]]
+
+
+def _markdown_ticker_summaries(
+    title: str,
+    rows: tuple[object, ...],
+) -> list[str]:
+    lines = [f"## {title}", ""]
+    covered = [
+        row
+        for row in rows
+        if row.read_first_story or row.read_next_story or row.background_story
+    ]
+    if not covered:
+        return [*lines, "No matched stories were available for configured names."]
+    lines.extend(f"- {_escape_markdown(row.ticker_daily_summary)}" for row in covered)
+    return lines
+
+
+def _markdown_stories_to_watch(report: DailyReportContract) -> list[str]:
+    lines = ["## Stories to Watch", ""]
+    written = False
     for ticker, clusters in sorted(report.event_clusters_by_ticker.items()):
-        visible_clusters = clusters[:5]
-        if not visible_clusters:
+        visible = clusters[:5]
+        if not visible:
             continue
-        event_written = True
-        lines.append(f"### {ticker}")
+        written = True
         lines.extend(
             [
-                "| Event | Bucket | Weighted Sentiment | Extraction Basis | First Seen | Latest Seen | Articles | Publishers | Sources |",
-                "| --- | --- | ---: | --- | --- | --- | ---: | ---: | ---: |",
+                f"### {ticker}",
+                "",
+                "| Story | Summary | Priority | Basis | Bucket | Publishers | Sources |",
+                "| --- | --- | --- | --- | --- | ---: | ---: |",
             ]
         )
-        for cluster in visible_clusters:
+        lines.extend(
+            f"| [{_escape_markdown(cluster.title)}]({cluster.primary_link}) | "
+            f"{_escape_markdown(cluster.cluster_summary or cluster.title)} | "
+            f"{cluster.cluster_reading_priority} | {cluster.cluster_summary_basis} | "
+            f"{cluster.recency_bucket} | {cluster.publisher_count} | {cluster.source_count} |"
+            for cluster in visible
+        )
+        lines.append("")
+    if not written:
+        lines.append("No event clusters matched configured tickers.")
+    return lines
+
+
+def _markdown_ranked_reads(report: DailyReportContract) -> list[str]:
+    lines = ["## Ranked Reads By Ticker", ""]
+    written = False
+    for ticker, reads in sorted(report.ranked_reads_by_ticker.items()):
+        visible = [read for read in reads if read.reading_priority != "background_only"][:2]
+        if not visible:
+            continue
+        written = True
+        lines.append(f"### {ticker}")
+        for read in visible:
             lines.append(
-                f"| [{_escape_markdown(cluster.title)}]({cluster.primary_link}) | {cluster.recency_bucket} | {_optional_markdown_score(cluster.weighted_cluster_sentiment)} | {cluster.extraction_basis} | {cluster.first_seen_at or ''} | {cluster.latest_seen_at or ''} | {cluster.article_count} | {cluster.publisher_count} | {cluster.source_count} |"
+                f"- **{read.reading_priority}:** [{_escape_markdown(read.title)}]({read.url}) "
+                f"({_escape_markdown(read.source)}, {read.summary_basis}) - "
+                f"{_escape_markdown(read.article_summary)}"
             )
         lines.append("")
-    if not event_written:
-        lines.append("No event clusters matched configured tickers.")
-    lines.extend(["", "## Article Links Grouped By Ticker And Event Cluster", ""])
+    if not written:
+        lines.append("No ranked reads were available for configured tickers.")
+    return lines
+
+
+def _markdown_read_more(report: DailyReportContract) -> list[str]:
+    lines = ["## Read More By Ticker", ""]
     linked = False
     for ticker, links in sorted(report.supporting_article_links.items()):
         if not links:
@@ -1656,8 +1779,35 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         lines.append("")
     if not linked:
         lines.append("No article links matched configured tickers.")
-    report_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    return str(report_path)
+    return lines
+
+
+def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
+    return [
+        "## Source and Extraction Diagnostics",
+        "",
+        "### Source Quality Summary",
+        "",
+        "| Total Articles | Visible Articles | Excluded Articles | Tier 1 | Tier 2 | Tier 3 Visible | Tier 3 Hidden | Tier 4 Excluded | Unknown |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        _markdown_source_quality_summary_row(report.extraction_summary.source_quality_summary),
+        "",
+        "### Article Extraction Summary",
+        "",
+        "| Article Fetch Attempts | Publisher Article Fetches | Google Wrappers Skipped | Google Wrappers Resolved | Full Text Successes | Snippet Fallbacks | Title Fallbacks |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        _markdown_extraction_summary_row(report.extraction_summary),
+        "",
+        "| Full Text Basis | Snippet Basis | Title Basis | Trafilatura | Newspaper3k | Internal Parser |",
+        "| ---: | ---: | ---: | --- | --- | --- |",
+        _markdown_extractor_status_row(report.extraction_summary),
+        "",
+        "| Extraction Diagnostic | Value |",
+        "| --- | --- |",
+        *_markdown_extraction_diagnostic_rows(report.extraction_summary),
+        "",
+        *_markdown_failure_reason_rows(report.extraction_summary),
+    ]
 
 
 def _escape_markdown(value: str | None) -> str:

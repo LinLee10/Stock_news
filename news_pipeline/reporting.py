@@ -11,6 +11,7 @@ from typing import Iterable, Mapping
 from .charts import write_placeholder_chart
 from .models import RunResult
 from .source_quality import SourceQualitySummary
+from .summaries import ArticleMicroSummary, RankedArticleRecommendation, TickerDailySummary
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,10 @@ class EventClusterRow:
     weighted_cluster_sentiment: float | None = None
     extraction_basis: str = "not_fetched"
     source_quality_label: str = "tier_2_usable"
+    cluster_summary: str = ""
+    cluster_summary_basis: str = "title"
+    cluster_reading_priority: str = "background_only"
+    ranking_score: float = 0.0
     supporting_links: tuple[ArticleLink, ...] = ()
 
 
@@ -125,6 +130,10 @@ class DailyReportInput:
     emerging_names: tuple[EmergingNameRow, ...] = ()
     article_links_by_ticker: Mapping[str, tuple[ArticleLink, ...]] = field(default_factory=dict)
     event_clusters_by_ticker: Mapping[str, tuple[EventClusterRow, ...]] = field(default_factory=dict)
+    portfolio_summaries: tuple[TickerDailySummary, ...] = ()
+    watchlist_summaries: tuple[TickerDailySummary, ...] = ()
+    ranked_reads_by_ticker: Mapping[str, tuple[RankedArticleRecommendation, ...]] = field(default_factory=dict)
+    article_summaries: tuple[ArticleMicroSummary, ...] = ()
     extraction_summary: ExtractionSummary = field(default_factory=ExtractionSummary)
     data_source_label: str = "local RSS fixtures"
 
@@ -143,6 +152,10 @@ class DailyReportContract:
     top_event_clusters: tuple[EventClusterRow, ...]
     event_clusters_by_ticker: Mapping[str, tuple[EventClusterRow, ...]]
     supporting_article_links: Mapping[str, tuple[ArticleLink, ...]]
+    portfolio_summaries: tuple[TickerDailySummary, ...]
+    watchlist_summaries: tuple[TickerDailySummary, ...]
+    ranked_reads_by_ticker: Mapping[str, tuple[RankedArticleRecommendation, ...]]
+    article_summaries: tuple[ArticleMicroSummary, ...]
     extraction_summary: ExtractionSummary
     csv_attachments: tuple[str, ...]
     chart_attachments: tuple[str, ...]
@@ -239,6 +252,10 @@ def build_daily_report(
         top_event_clusters=top_event_clusters,
         event_clusters_by_ticker=report_input.event_clusters_by_ticker,
         supporting_article_links=report_input.article_links_by_ticker,
+        portfolio_summaries=report_input.portfolio_summaries,
+        watchlist_summaries=report_input.watchlist_summaries,
+        ranked_reads_by_ticker=report_input.ranked_reads_by_ticker,
+        article_summaries=report_input.article_summaries,
         extraction_summary=report_input.extraction_summary,
         csv_attachments=csv_attachments,
         chart_attachments=chart_attachments,
@@ -323,6 +340,7 @@ def _top_event_clusters(
         sorted(
             clusters,
             key=lambda cluster: (
+                cluster.ranking_score,
                 _quality_rank(cluster.source_quality_label),
                 bucket_rank.get(cluster.recency_bucket, 0),
                 cluster.source_count,
@@ -365,7 +383,7 @@ def _write_html_preview(
         "<head>",
         "  <meta charset=\"utf-8\">",
         "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
-        f"  <title>News Pipeline Dry Run - {escape(report_input.report_date)}</title>",
+        f"  <title>Portfolio and Watchlist Market Briefing - {escape(report_input.report_date)}</title>",
         "  <style>",
         "    body{font-family:Arial,sans-serif;margin:24px;line-height:1.45;color:#17202a;background:#fff}",
         "    h1,h2{color:#17202a}",
@@ -382,22 +400,15 @@ def _write_html_preview(
         "  </style>",
         "</head>",
         "<body>",
-        f"  <h1>News Pipeline Dry Run - {escape(report_input.report_date)}</h1>",
-        f"  <div class=\"note\"><strong>Data source:</strong> {escape(report_input.data_source_label)}. No paid APIs were called and no email was sent.</div>",
-        "  <div class=\"note\"><strong>Model status:</strong> Sentiment is deterministic placeholder logic, and watchlist direction rows are not real predictions. This report is not investment advice.</div>",
+        f"  <h1>Portfolio and Watchlist Market Briefing - {escape(report_input.report_date)}</h1>",
+        "  <div class=\"note\">Sentiment is deterministic placeholder logic until a stronger model is wired in. Summaries are generated from extracted full text when available, otherwise snippets or titles. Direction rows are not predictions. This report is not investment advice.</div>",
+        f"  <p class=\"muted\"><strong>Data source:</strong> {escape(report_input.data_source_label)}. No paid APIs were called and no email was sent.</p>",
         f"  <div class=\"summary\">{escape(_plain_english_summary(report_input, top_10))}</div>",
         _top_briefing_html(report_input, top_10),
-        "  <h2>Plain English Readout</h2>",
-        "  <ul>",
-        f"    <li>{escape(_sentiment_movers_sentence(report_input))}</li>",
-        f"    <li>{escape(_news_volume_sentence(top_10))}</li>",
-        f"    <li>{escape(_attention_sentence(report_input))}</li>",
-        "    <li>All sentiment basis labels are shown as full_text, snippet, title, or no_articles.</li>",
-        "  </ul>",
+        _ticker_summaries_html("Portfolio Summary", report_input.portfolio_summaries),
+        _ticker_summaries_html("Watchlist Summary", report_input.watchlist_summaries),
         _event_clusters_html(report_input.event_clusters_by_ticker),
-        _article_links_html(report_input.article_links_by_ticker),
-        _source_quality_summary_html(report_input.extraction_summary.source_quality_summary),
-        _extraction_summary_html(report_input.extraction_summary),
+        _ranked_reads_html(report_input.ranked_reads_by_ticker),
         _recency_sections_html(report_input),
         _sentiment_table_html("Portfolio Recency Sentiment", report_input.portfolio_sentiment),
         _sentiment_table_html("Watchlist Recency Sentiment", report_input.watchlist_sentiment),
@@ -405,6 +416,10 @@ def _write_html_preview(
         _mention_leaders_html(report_input.mention_leaders_7d),
         _top_10_html(top_10),
         _emerging_names_html(report_input.emerging_names),
+        _article_links_html(report_input.article_links_by_ticker),
+        "  <h2>Source and Extraction Diagnostics</h2>",
+        _source_quality_summary_html(report_input.extraction_summary.source_quality_summary),
+        _extraction_summary_html(report_input.extraction_summary),
         "</body>",
         "</html>",
     ]
@@ -784,7 +799,7 @@ def _emerging_names_html(rows: tuple[EmergingNameRow, ...]) -> str:
 
 
 def _article_links_html(links_by_ticker: Mapping[str, tuple[ArticleLink, ...]]) -> str:
-    body = ["  <h2>Article Links Grouped By Ticker And Event Cluster</h2>"]
+    body = ["  <h2>Read More By Ticker</h2>"]
     linked = False
     for ticker, links in sorted(links_by_ticker.items()):
         if not links:
@@ -805,7 +820,7 @@ def _article_links_html(links_by_ticker: Mapping[str, tuple[ArticleLink, ...]]) 
 
 
 def _event_clusters_html(clusters_by_ticker: Mapping[str, tuple[EventClusterRow, ...]]) -> str:
-    body = ["  <h2>Top Event Clusters By Recency And Source Diversity</h2>"]
+    body = ["  <h2>Stories to Watch</h2>"]
     shown = False
     for ticker, clusters in sorted(clusters_by_ticker.items()):
         visible_clusters = clusters[:5]
@@ -814,32 +829,63 @@ def _event_clusters_html(clusters_by_ticker: Mapping[str, tuple[EventClusterRow,
         shown = True
         body.append(f"  <h3>{escape(ticker)}</h3>")
         body.append("  <table>")
-        body.append("    <tr><th>Event</th><th>Bucket</th><th>Sentiment</th><th>Extraction Basis</th><th>First Seen</th><th>Latest Seen</th><th>Articles</th><th>Publishers</th><th>Sources</th><th>Visible Links</th></tr>")
+        body.append("    <tr><th>Story</th><th>Summary</th><th>Priority</th><th>Basis</th><th>Bucket</th><th>Publishers</th><th>Sources</th></tr>")
         for cluster in visible_clusters:
-            links = sorted(cluster.supporting_links, key=lambda link: (link.source_quality_label, link.title, link.url))[:3]
-            links_html = "<br>".join(
-                f"<a href=\"{escape(link.url, quote=True)}\">{escape(link.source or link.title)}</a>"
-                for link in links
-            )
-            if len(cluster.supporting_links) > len(links):
-                links_html += f"<br><span class=\"empty\">+{len(cluster.supporting_links) - len(links)} more in JSON artifacts</span>"
             body.append(
                 "    <tr>"
-                f"<td><a href=\"{escape(cluster.primary_link, quote=True)}\">{escape(cluster.title)}</a></td>"
+                f"<td>{escape(cluster.title)}<br><a href=\"{escape(cluster.primary_link, quote=True)}\">Open story</a></td>"
+                f"<td>{escape(cluster.cluster_summary or cluster.title)}</td>"
+                f"<td>{escape(cluster.cluster_reading_priority)}</td>"
+                f"<td>{escape(cluster.cluster_summary_basis)}</td>"
                 f"<td>{escape(cluster.recency_bucket)}</td>"
-                f"<td class=\"num\">{_format_optional_score(cluster.weighted_cluster_sentiment)}</td>"
-                f"<td>{escape(cluster.extraction_basis)}</td>"
-                f"<td>{escape(cluster.first_seen_at or '')}</td>"
-                f"<td>{escape(cluster.latest_seen_at or '')}</td>"
-                f"<td class=\"num\">{cluster.article_count}</td>"
                 f"<td class=\"num\">{cluster.publisher_count}</td>"
                 f"<td class=\"num\">{cluster.source_count}</td>"
-                f"<td>{links_html}</td>"
                 "</tr>"
             )
         body.append("  </table>")
     if not shown:
         body.append("  <p class=\"empty\">No event clusters matched configured tickers.</p>")
+    return "\n".join(body)
+
+
+def _ticker_summaries_html(title: str, rows: tuple[TickerDailySummary, ...]) -> str:
+    body = [f"  <h2>{escape(title)}</h2>"]
+    covered = [row for row in rows if row.read_first_story or row.read_next_story or row.background_story]
+    if not covered:
+        body.append("  <p class=\"empty\">No matched stories were available for configured names.</p>")
+        return "\n".join(body)
+    body.append("  <ul>")
+    body.extend(f"    <li>{escape(row.ticker_daily_summary)}</li>" for row in covered)
+    body.append("  </ul>")
+    return "\n".join(body)
+
+
+def _ranked_reads_html(
+    reads_by_ticker: Mapping[str, tuple[RankedArticleRecommendation, ...]],
+) -> str:
+    body = ["  <h2>Ranked Reads By Ticker</h2>"]
+    shown = False
+    for ticker, reads in sorted(reads_by_ticker.items()):
+        visible = [read for read in reads if read.reading_priority != "background_only"][:2]
+        if not visible:
+            continue
+        shown = True
+        body.append(f"  <h3>{escape(ticker)}</h3>")
+        body.append("  <ul>")
+        for read in visible:
+            warning = f" {read.summary_warning}" if read.summary_warning else ""
+            body.append(
+                "    <li>"
+                f"<strong>{escape(read.reading_priority)}:</strong> "
+                f"<a href=\"{escape(read.url, quote=True)}\">{escape(read.title)}</a> "
+                f"({escape(read.source)}, {escape(read.summary_basis)}) - "
+                f"{escape(read.article_summary)}"
+                f"<span class=\"muted\">{escape(warning)}</span>"
+                "</li>"
+            )
+        body.append("  </ul>")
+    if not shown:
+        body.append("  <p class=\"empty\">No ranked reads were available for configured tickers.</p>")
     return "\n".join(body)
 
 

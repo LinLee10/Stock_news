@@ -224,8 +224,14 @@ class CliTests(unittest.TestCase):
             self.assertIn("Data source: local RSS fixtures", markdown)
             self.assertIn("Placeholder direction logic", markdown)
             self.assertIn("Watchlist Recency Sentiment", html)
-            self.assertIn("Article Links Grouped By Ticker And Event Cluster", html)
-            self.assertIn("full_text, snippet, title, or no_articles", html)
+            self.assertIn("Portfolio and Watchlist Market Briefing", html)
+            self.assertIn("Stories to Watch", html)
+            self.assertIn("Read More By Ticker", html)
+            self.assertLess(html.index("Stories to Watch"), html.index("Read More By Ticker"))
+            self.assertIn(
+                "Summaries are generated from extracted full text when available, otherwise snippets or titles.",
+                html,
+            )
             self.assertTrue(Path(contract["html_preview_report"]).exists())
 
             with (output_dir / "portfolio_30d_sentiment.csv").open(newline="", encoding="utf-8") as handle:
@@ -330,10 +336,13 @@ class CliTests(unittest.TestCase):
             self.assertIn("Daily report for 2026-06-03", preview)
             self.assertIn("Portfolio Recency Sentiment", preview)
             self.assertIn("Watchlist Recency Sentiment", preview)
-            self.assertIn("Article Links Grouped By Ticker And Event Cluster", preview)
+            self.assertIn("Portfolio and Watchlist Market Briefing", preview)
+            self.assertIn("Stories to Watch", preview)
+            self.assertIn("Read More By Ticker", preview)
             self.assertIn("https://example.com/news/nvidia-new-chip", preview)
             self.assertLess(preview.index("Daily Briefing"), preview.index("Source Quality Summary"))
-            self.assertLess(preview.index("Top Event Clusters"), preview.index("Source Quality Summary"))
+            self.assertLess(preview.index("Stories to Watch"), preview.index("Read More By Ticker"))
+            self.assertLess(preview.index("Read More By Ticker"), preview.index("Source Quality Summary"))
             self.assertIn("Intended Attachments", preview)
             self.assertIn("portfolio_30d_sentiment.csv", preview)
             self.assertNotIn("watchlist_sentiment.svg", preview)
@@ -591,6 +600,10 @@ class CliTests(unittest.TestCase):
             self.assertEqual(contract["extraction_summary"]["article_pages_fetched"], 1)
             self.assertEqual(contract["extraction_summary"]["successful_extractions"], 1)
             self.assertEqual(contract["extraction_summary"]["sentiment_basis_counts"]["full_text"], 1)
+            self.assertTrue(contract["article_summaries"])
+            self.assertEqual(contract["article_summaries"][0]["summary_basis"], "full_text")
+            self.assertIn("ranked_reads_by_ticker", contract)
+            self.assertIn("ticker_daily_summary", contract["portfolio_summaries"][5])
             self.assertIn("trafilatura_available", contract["extraction_summary"]["extractor_diagnostics"])
             self.assertIn("newspaper3k_available", contract["extraction_summary"]["extractor_diagnostics"])
             self.assertTrue(contract["extraction_summary"]["extractor_diagnostics"]["internal_parser_available"])
@@ -601,8 +614,8 @@ class CliTests(unittest.TestCase):
             self.assertIn("Article Extraction Summary", html)
             self.assertIn("Article Extraction Summary", email_html)
             self.assertLess(email_html.index("Daily Briefing"), email_html.index("Article Extraction Summary"))
-            self.assertIn("Extraction Basis", html)
-            self.assertIn("Extraction Basis", email_html)
+            self.assertIn("Basis", html)
+            self.assertIn("Basis", email_html)
             for diagnostic in (
                 "trafilatura_available",
                 "newspaper3k_available",

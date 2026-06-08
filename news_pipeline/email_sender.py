@@ -229,7 +229,7 @@ def build_report_email_payload(
     )
     return (
         EmailSendPayload(
-            subject=f"Daily Stock News Sentiment Report - {run_date}",
+            subject=f"Portfolio and Watchlist Market Briefing - {run_date}",
             to=recipient,
             html_body=_html_for_delivery_mode(
                 preview_path.read_text(encoding="utf-8"),
@@ -359,7 +359,7 @@ def _plain_text_body(
     attachment_names = ", ".join(item.filename for item in attachments) or "none"
     return "\n".join(
         [
-            f"Daily Stock News Sentiment Report - {run_date}",
+            f"Portfolio and Watchlist Market Briefing - {run_date}",
             "",
             summary,
             "",
