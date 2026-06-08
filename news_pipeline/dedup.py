@@ -10,7 +10,17 @@ import re
 from typing import Callable, Iterable
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse, urlunparse
 
+from .article_types import (
+    ANALYST_RATING_OR_PRICE_TARGET,
+    EARNINGS_OR_RESULTS,
+    GENERIC_BUY_SELL_HOLD_OPINION,
+    MACRO_OR_SECTOR_ROUNDUP,
+    STOCK_PRICE_MOVE,
+    classify_article_text,
+    classify_article_type,
+)
 from .models import Article
+from .ticker_matching import assess_ticker_matches, primary_ticker
 from .tickers import match_tickers
 
 
@@ -197,6 +207,16 @@ class DedupeCluster:
     source_count: int
     publisher_names: tuple[str, ...]
     source_providers: tuple[str, ...]
+    cluster_id: str = ""
+    primary_ticker: str | None = None
+    matched_tickers: tuple[str, ...] = ()
+    related_tickers: tuple[str, ...] = ()
+    event_type: str = "unknown"
+    primary_article_id: str = ""
+    supporting_article_ids: tuple[str, ...] = ()
+    supporting_publishers: tuple[str, ...] = ()
+    source_diversity: int = 0
+    publisher_diversity: int = 0
 
 
 def canonicalize_url(url: str) -> str:
@@ -322,6 +342,15 @@ class _MutableCluster:
         links = tuple(dict.fromkeys(link.url for link in supporting_links if link.url != self.canonical_article.canonical_url))
         publisher_names = tuple(sorted({link.publisher for link in supporting_links if link.publisher}))
         source_providers = tuple(sorted({link.provider for link in supporting_links if link.provider}))
+        assessments = [
+            assessment
+            for article in self.articles
+            for assessment in assess_ticker_matches(article)
+        ]
+        matched_tickers = tuple(sorted({assessment.ticker for assessment in assessments}))
+        related_tickers = tuple(sorted({assessment.ticker for assessment in assessments if assessment.related}))
+        article_ids = tuple(_article_identifier(article) for article in self.articles)
+        canonical_id = _article_identifier(self.canonical_article)
         return DedupeCluster(
             canonical_article=self.canonical_article,
             alternate_source_links=links,
@@ -333,6 +362,16 @@ class _MutableCluster:
             source_count=len(source_providers),
             publisher_names=publisher_names,
             source_providers=source_providers,
+            cluster_id=_cluster_identifier(self.canonical_article),
+            primary_ticker=primary_ticker(self.canonical_article),
+            matched_tickers=matched_tickers,
+            related_tickers=related_tickers,
+            event_type=classify_article_type(self.canonical_article).primary_type,
+            primary_article_id=canonical_id,
+            supporting_article_ids=tuple(article_id for article_id in article_ids if article_id != canonical_id),
+            supporting_publishers=publisher_names,
+            source_diversity=len(source_providers),
+            publisher_diversity=len(publisher_names),
         )
 
 
@@ -428,16 +467,49 @@ def _same_ticker_near_publish_date(article: Article, canonical: Article) -> bool
 
 
 def _ticker_sets_compatible(article: Article, canonical: Article) -> bool:
-    article_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(article))}
-    canonical_tickers = {ticker.symbol for ticker in match_tickers(_article_match_text(canonical))}
+    article_primary = primary_ticker(article)
+    canonical_primary = primary_ticker(canonical)
+    if article_primary and canonical_primary:
+        return article_primary == canonical_primary
+    article_tickers = {
+        match.ticker
+        for match in assess_ticker_matches(article)
+        if not match.related
+    }
+    canonical_tickers = {
+        match.ticker
+        for match in assess_ticker_matches(canonical)
+        if not match.related
+    }
     return not article_tickers or not canonical_tickers or bool(article_tickers & canonical_tickers)
 
 
 def _event_types_compatible(article: Article, canonical: Article, similarity: float) -> bool:
-    article_types = event_types_for_title(article.title)
-    canonical_types = event_types_for_title(canonical.title)
+    article_types = set(classify_article_type(article).event_types)
+    canonical_types = set(classify_article_type(canonical).event_types)
     if not article_types or not canonical_types:
         return True
+    if (
+        (MACRO_OR_SECTOR_ROUNDUP in article_types) != (MACRO_OR_SECTOR_ROUNDUP in canonical_types)
+        and similarity < 0.96
+    ):
+        return False
+    if (
+        ANALYST_RATING_OR_PRICE_TARGET in article_types
+        and EARNINGS_OR_RESULTS in canonical_types
+    ) or (
+        EARNINGS_OR_RESULTS in article_types
+        and ANALYST_RATING_OR_PRICE_TARGET in canonical_types
+    ):
+        return similarity >= 0.96
+    if (
+        GENERIC_BUY_SELL_HOLD_OPINION in article_types
+        and STOCK_PRICE_MOVE in canonical_types
+    ) or (
+        STOCK_PRICE_MOVE in article_types
+        and GENERIC_BUY_SELL_HOLD_OPINION in canonical_types
+    ):
+        return similarity >= 0.96
     if article_types & canonical_types:
         return True
     if similarity >= 0.94:
@@ -446,13 +518,7 @@ def _event_types_compatible(article: Article, canonical: Article, similarity: fl
 
 
 def event_types_for_title(title: str) -> frozenset[str]:
-    normalized = normalize_title(title)
-    event_types = {
-        event_type
-        for event_type, keywords in EVENT_TYPE_KEYWORDS.items()
-        if any(_contains_keyword(normalized, keyword) for keyword in keywords)
-    }
-    return frozenset(event_types)
+    return frozenset(classify_article_text(title).event_types)
 
 
 def _contains_keyword(normalized_title: str, keyword: str) -> bool:
@@ -484,3 +550,14 @@ def _source_link(article: Article) -> SourceLink:
         provider=metadata.get("provider"),
         published_at=article.published_at,
     )
+
+
+def _article_identifier(article: Article) -> str:
+    if article.article_id:
+        return article.article_id
+    return f"art_{hashlib.sha256(article.canonical_url.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _cluster_identifier(article: Article) -> str:
+    material = f"{canonicalize_url(article.canonical_url)}|{normalize_title(article.title)}"
+    return f"cluster_{hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]}"

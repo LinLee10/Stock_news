@@ -5,10 +5,11 @@ from news_pipeline.article_fetch import (
     URL_CLASS_DIRECT_PUBLISHER,
     URL_CLASS_GOOGLE_NEWS_WRAPPER,
     URL_CLASS_UNSUPPORTED,
+    build_extraction_queue,
     classify_article_url,
     fetch_top_cluster_articles,
 )
-from news_pipeline.dedup import DedupeCluster, SourceLink
+from news_pipeline.dedup import DedupeCluster, SourceLink, cluster_articles
 from news_pipeline.models import Article
 
 
@@ -85,7 +86,7 @@ class ArticleFetchTests(unittest.TestCase):
         self.assertEqual(summary.attempted_fetches, 1)
         self.assertEqual(urlopen.call_args.args[0].full_url, high_quality.canonical_url)
 
-    def test_unresolved_google_wrapper_does_not_consume_fetch_budget_when_direct_url_is_available(self):
+    def test_direct_url_is_selected_before_google_wrapper_when_budget_is_limited(self):
         google = _article("https://news.google.com/rss/articles/google", "NVIDIA wrapper")
         direct = _article("https://www.cnbc.com/nvidia", "NVIDIA publisher", provider="cnbc_rss", source="CNBC")
 
@@ -103,9 +104,10 @@ class ArticleFetchTests(unittest.TestCase):
 
         self.assertEqual(summary.attempted_fetches, 1)
         self.assertEqual(summary.publisher_article_fetches, 1)
-        self.assertEqual(summary.google_news_wrappers_skipped, 1)
-        self.assertEqual(summary.records[0].error_class, "google_news_unresolved")
-        self.assertFalse(summary.records[0].fetched)
+        self.assertEqual(summary.google_news_wrappers_skipped, 0)
+        self.assertEqual(summary.extraction_selected_count, 1)
+        self.assertEqual(summary.extraction_skipped_reasons["max_article_fetches"], 1)
+        self.assertEqual(summary.extraction_skipped_count, 1)
 
     def test_resolved_google_news_url_can_be_fetched_as_publisher_url(self):
         google = _article("https://news.google.com/rss/articles/google", "NVIDIA wrapper")
@@ -174,6 +176,48 @@ class ArticleFetchTests(unittest.TestCase):
         self.assertIn("extraction_method_used", payload["records"][0])
         self.assertIn("extraction_failure_reason", payload["records"][0])
         self.assertIn("extraction_method_counts", payload)
+
+    def test_extraction_queue_prioritizes_high_quality_ticker_specific_article(self):
+        high = _article(
+            "https://reuters.com/nvidia-results",
+            "NVIDIA earnings beat estimates",
+            provider="reuters_rss",
+            source="Reuters",
+        )
+        weak = _article(
+            "https://stocktwits.com/nvidia-opinion",
+            "Is NVIDIA a good stock to buy now?",
+            provider="stocktwits",
+            source="Stocktwits",
+        )
+
+        queue = build_extraction_queue(
+            cluster_articles((weak, high)),
+            run_date="2026-06-08",
+            include_low_quality_sources=False,
+            min_source_quality_tier=3,
+        )
+
+        self.assertEqual(queue[0].article.canonical_url, high.canonical_url)
+        self.assertGreater(queue[0].score, queue[1].score)
+
+    def test_extraction_queue_excludes_low_quality_source_by_default(self):
+        excluded = _article(
+            "https://stocktwits.com/nvidia",
+            "NVIDIA stock news",
+            provider="stocktwits",
+            source="Stocktwits",
+        )
+
+        queue = build_extraction_queue(
+            cluster_articles((excluded,)),
+            run_date="2026-06-08",
+            include_low_quality_sources=False,
+            min_source_quality_tier=3,
+        )
+
+        self.assertFalse(queue[0].eligible)
+        self.assertEqual(queue[0].skip_reason, "source_quality_excluded")
 
 
 def _article(url, title, *, snippet="NVIDIA stock news.", provider="google_news_rss_search", source="Google News"):

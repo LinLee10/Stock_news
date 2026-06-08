@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
+from datetime import date
 from html import escape
 from pathlib import Path
 from typing import Iterable, Mapping
 
 from .charts import write_placeholder_chart
 from .models import RunResult
+from .sentiment_coverage import TickerSentimentCoverage, WeightedArticleSentiment
 from .source_quality import SourceQualitySummary
 from .summaries import ArticleMicroSummary, RankedArticleRecommendation, TickerDailySummary
 
@@ -43,6 +45,29 @@ class ExtractionSummary:
     })
     source_quality_summary: SourceQualitySummary = field(default_factory=SourceQualitySummary)
     show_excluded_source_diagnostics: bool = False
+    extraction_queue_size: int = 0
+    extraction_selected_count: int = 0
+    extraction_skipped_count: int = 0
+    extraction_skipped_reasons: Mapping[str, int] = field(default_factory=dict)
+    extraction_success_rate: float = 0.0
+    extraction_success_rate_by_publisher: Mapping[str, float] = field(default_factory=dict)
+    extraction_success_rate_by_source_provider: Mapping[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BackendArticlePoolSummary:
+    backend_candidate_articles: int = 0
+    backend_visible_articles: int = 0
+    backend_scored_articles: int = 0
+    backend_extracted_articles: int = 0
+
+
+@dataclass(frozen=True)
+class EmailDisplaySummary:
+    email_visible_stories: int = 0
+    email_visible_ranked_reads: int = 0
+    max_email_stories: int = 60
+    max_ranked_reads_per_ticker: int = 3
 
 
 @dataclass(frozen=True)
@@ -136,6 +161,16 @@ class DailyReportInput:
     article_summaries: tuple[ArticleMicroSummary, ...] = ()
     extraction_summary: ExtractionSummary = field(default_factory=ExtractionSummary)
     data_source_label: str = "local RSS fixtures"
+    report_warnings: tuple[str, ...] = ()
+    backend_article_pool_summary: BackendArticlePoolSummary = field(default_factory=BackendArticlePoolSummary)
+    source_coverage_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    extraction_coverage_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    dedupe_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    ticker_match_confidence_summary: Mapping[str, object] = field(default_factory=dict)
+    article_type_counts: Mapping[str, int] = field(default_factory=dict)
+    ticker_sentiment_coverage: Mapping[str, TickerSentimentCoverage] = field(default_factory=dict)
+    email_display_summary: EmailDisplaySummary = field(default_factory=EmailDisplaySummary)
+    backend_sentiment_inputs: tuple[WeightedArticleSentiment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -162,6 +197,16 @@ class DailyReportContract:
     html_preview_report: str
     daily_summary: str
     data_source_label: str
+    report_warnings: tuple[str, ...]
+    backend_article_pool_summary: BackendArticlePoolSummary
+    source_coverage_diagnostics: Mapping[str, object]
+    extraction_coverage_diagnostics: Mapping[str, object]
+    dedupe_diagnostics: Mapping[str, object]
+    ticker_match_confidence_summary: Mapping[str, object]
+    article_type_counts: Mapping[str, int]
+    ticker_sentiment_coverage: Mapping[str, TickerSentimentCoverage]
+    email_display_summary: EmailDisplaySummary
+    supplemental_csv_artifacts: tuple[str, ...]
 
 
 def summarize_run(run: RunResult) -> dict[str, object]:
@@ -186,6 +231,7 @@ def build_daily_report(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     top_10 = tuple(sorted(report_input.most_mentioned, key=lambda row: row.rank)[:10])
+    report_warnings = _report_warnings(report_input.report_date, report_input.report_warnings)
     recency_sections = _recency_section_rows(report_input)
     top_event_clusters = _top_event_clusters(report_input.event_clusters_by_ticker)
     csv_attachments = (
@@ -218,6 +264,59 @@ def build_daily_report(
             output_dir / "emerging_names.csv",
             ("ticker", "company_name", "mentions_7d", "prior_mentions_30d", "reason"),
             report_input.emerging_names,
+        ),
+    )
+    supplemental_csv_artifacts = (
+        _write_csv(
+            output_dir / "backend_articles_scored.csv",
+            (
+                "ticker",
+                "canonical_url",
+                "title",
+                "cluster_id",
+                "sentiment_raw",
+                "sentiment_basis",
+                "sentiment_weight",
+                "sentiment_weight_reasons",
+                "ticker_match_confidence",
+                "ticker_match_confidence_label",
+                "ticker_match_reason",
+                "article_type",
+                "primary_cluster_article",
+            ),
+            report_input.backend_sentiment_inputs,
+        ),
+        _write_csv(
+            output_dir / "ticker_sentiment_coverage.csv",
+            (
+                "ticker",
+                "article_count_scored",
+                "full_text_scored_count",
+                "snippet_scored_count",
+                "title_scored_count",
+                "weighted_sentiment",
+                "positive_article_count",
+                "negative_article_count",
+                "neutral_article_count",
+                "high_confidence_article_count",
+                "low_confidence_article_count",
+                "top_positive_cluster",
+                "top_negative_cluster",
+                "sentiment_coverage_grade",
+            ),
+            report_input.ticker_sentiment_coverage.values(),
+        ),
+        _write_mapping_csv(
+            output_dir / "article_type_counts.csv",
+            "article_type",
+            "count",
+            report_input.article_type_counts,
+        ),
+        _write_mapping_csv(
+            output_dir / "extraction_diagnostics.csv",
+            "diagnostic",
+            "value",
+            report_input.extraction_coverage_diagnostics,
         ),
     )
     chart_attachments = (
@@ -262,6 +361,16 @@ def build_daily_report(
         html_preview_report=html_preview_report,
         daily_summary=_plain_english_summary(report_input, top_10),
         data_source_label=report_input.data_source_label,
+        report_warnings=report_warnings,
+        backend_article_pool_summary=report_input.backend_article_pool_summary,
+        source_coverage_diagnostics=report_input.source_coverage_diagnostics,
+        extraction_coverage_diagnostics=report_input.extraction_coverage_diagnostics,
+        dedupe_diagnostics=report_input.dedupe_diagnostics,
+        ticker_match_confidence_summary=report_input.ticker_match_confidence_summary,
+        article_type_counts=report_input.article_type_counts,
+        ticker_sentiment_coverage=report_input.ticker_sentiment_coverage,
+        email_display_summary=report_input.email_display_summary,
+        supplemental_csv_artifacts=supplemental_csv_artifacts,
     )
 
 
@@ -279,6 +388,21 @@ def _write_csv(path: Path, fieldnames: tuple[str, ...], rows: Iterable[object]) 
         writer.writeheader()
         for row in rows:
             writer.writerow({field: getattr(row, field) for field in fieldnames})
+    return str(path)
+
+
+def _write_mapping_csv(
+    path: Path,
+    key_name: str,
+    value_name: str,
+    values: Mapping[str, object],
+) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=(key_name, value_name))
+        writer.writeheader()
+        for key, value in sorted(values.items()):
+            writer.writerow({key_name: key, value_name: value})
     return str(path)
 
 
@@ -401,14 +525,13 @@ def _write_html_preview(
         "</head>",
         "<body>",
         f"  <h1>Portfolio and Watchlist Market Briefing - {escape(report_input.report_date)}</h1>",
-        "  <div class=\"note\">Sentiment is deterministic placeholder logic until a stronger model is wired in. Summaries are generated from extracted full text when available, otherwise snippets or titles. Direction rows are not predictions. This report is not investment advice.</div>",
-        f"  <p class=\"muted\"><strong>Data source:</strong> {escape(report_input.data_source_label)}. No paid APIs were called and no email was sent.</p>",
-        f"  <div class=\"summary\">{escape(_plain_english_summary(report_input, top_10))}</div>",
+        "  <p class=\"muted\">This briefing is not investment advice. Direction rows are not predictions.</p>",
         _top_briefing_html(report_input, top_10),
         _ticker_summaries_html("Portfolio Summary", report_input.portfolio_summaries),
         _ticker_summaries_html("Watchlist Summary", report_input.watchlist_summaries),
         _event_clusters_html(report_input.event_clusters_by_ticker),
         _ranked_reads_html(report_input.ranked_reads_by_ticker),
+        _sentiment_coverage_html(report_input.ticker_sentiment_coverage),
         _recency_sections_html(report_input),
         _sentiment_table_html("Portfolio Recency Sentiment", report_input.portfolio_sentiment),
         _sentiment_table_html("Watchlist Recency Sentiment", report_input.watchlist_sentiment),
@@ -418,6 +541,8 @@ def _write_html_preview(
         _emerging_names_html(report_input.emerging_names),
         _article_links_html(report_input.article_links_by_ticker),
         "  <h2>Source and Extraction Diagnostics</h2>",
+        _report_metadata_html(report_input, top_10),
+        _backend_pool_diagnostics_html(report_input),
         _source_quality_summary_html(report_input.extraction_summary.source_quality_summary),
         _extraction_summary_html(report_input.extraction_summary),
         "</body>",
@@ -425,6 +550,95 @@ def _write_html_preview(
     ]
     path.write_text("\n".join(sections), encoding="utf-8")
     return str(path)
+
+
+def _report_warnings(report_date: str, existing: tuple[str, ...]) -> tuple[str, ...]:
+    warnings = list(existing)
+    if report_date != date.today().isoformat():
+        warnings.append("Run date differs from current date.")
+    return tuple(dict.fromkeys(warnings))
+
+
+def _report_metadata_html(
+    report_input: DailyReportInput,
+    top_10: tuple[MostMentionedRow, ...],
+) -> str:
+    warnings = _report_warnings(report_input.report_date, report_input.report_warnings)
+    body = [
+        "  <table>",
+        "    <tr><th>Report Diagnostic</th><th>Value</th></tr>",
+        f"    <tr><td>Run date</td><td>{escape(report_input.report_date)}</td></tr>",
+        f"    <tr><td>Current local date</td><td>{escape(date.today().isoformat())}</td></tr>",
+        f"    <tr><td>Data source</td><td>{escape(report_input.data_source_label)}</td></tr>",
+        "    <tr><td>Delivery mode</td><td>local report only; no email sent</td></tr>",
+        "    <tr><td>Paid API status</td><td>disabled</td></tr>",
+        f"    <tr><td>Report summary</td><td>{escape(_plain_english_summary(report_input, top_10))}</td></tr>",
+    ]
+    if warnings:
+        body.append(f"    <tr><td>Warnings</td><td>{escape(' '.join(warnings))}</td></tr>")
+    body.append("  </table>")
+    body.append(
+        "  <p class=\"muted\">Sentiment is deterministic placeholder logic until a stronger model is wired in. "
+        "Summaries use extracted full text when available, otherwise snippets or titles.</p>"
+    )
+    return "\n".join(body)
+
+
+def _sentiment_coverage_html(
+    coverage: Mapping[str, TickerSentimentCoverage],
+) -> str:
+    rows = [row for row in coverage.values() if row.article_count_scored]
+    body = [
+        "  <h2>Sentiment Coverage Summary</h2>",
+        "  <table>",
+        "    <tr><th>Ticker</th><th>Coverage</th><th>Weighted Sentiment</th><th>Scored</th><th>Full Text</th><th>Snippets</th><th>High Confidence</th><th>Low Confidence</th></tr>",
+    ]
+    if rows:
+        body.extend(
+            "    <tr>"
+            f"<td>{escape(row.ticker)}</td>"
+            f"<td>{escape(row.sentiment_coverage_grade)}</td>"
+            f"<td class=\"num\">{row.weighted_sentiment:.4f}</td>"
+            f"<td class=\"num\">{row.article_count_scored}</td>"
+            f"<td class=\"num\">{row.full_text_scored_count}</td>"
+            f"<td class=\"num\">{row.snippet_scored_count}</td>"
+            f"<td class=\"num\">{row.high_confidence_article_count}</td>"
+            f"<td class=\"num\">{row.low_confidence_article_count}</td>"
+            "</tr>"
+            for row in sorted(rows, key=lambda item: item.ticker)
+        )
+    else:
+        body.append("    <tr><td colspan=\"8\" class=\"empty\">No weighted sentiment coverage was available.</td></tr>")
+    body.append("  </table>")
+    return "\n".join(body)
+
+
+def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
+    backend = report_input.backend_article_pool_summary
+    email = report_input.email_display_summary
+    confidence = report_input.ticker_match_confidence_summary
+    return "\n".join(
+        [
+            "  <h2>Backend and Email Pool Summary</h2>",
+            "  <table>",
+            "    <tr><th>Backend Candidates</th><th>Backend Visible</th><th>Backend Scored</th><th>Backend Full Text</th><th>Email Stories</th><th>Email Ranked Reads</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{backend.backend_candidate_articles}</td>"
+            f"<td class=\"num\">{backend.backend_visible_articles}</td>"
+            f"<td class=\"num\">{backend.backend_scored_articles}</td>"
+            f"<td class=\"num\">{backend.backend_extracted_articles}</td>"
+            f"<td class=\"num\">{email.email_visible_stories}</td>"
+            f"<td class=\"num\">{email.email_visible_ranked_reads}</td>"
+            "</tr>",
+            "  </table>",
+            "  <table>",
+            "    <tr><th>Ticker Match Confidence</th><th>Count</th></tr>",
+            f"    <tr><td>High</td><td class=\"num\">{int(confidence.get('high_confidence_matches', 0))}</td></tr>",
+            f"    <tr><td>Medium</td><td class=\"num\">{int(confidence.get('medium_confidence_matches', 0))}</td></tr>",
+            f"    <tr><td>Low</td><td class=\"num\">{int(confidence.get('low_confidence_matches', 0))}</td></tr>",
+            "  </table>",
+        ]
+    )
 
 
 def _recency_sections_html(report_input: DailyReportInput) -> str:
@@ -545,6 +759,15 @@ def _extraction_summary_html(summary: ExtractionSummary) -> str:
             f"<td class=\"num\">{basis_counts['full_text']}</td>"
             f"<td class=\"num\">{basis_counts['snippet']}</td>"
             f"<td class=\"num\">{basis_counts['title']}</td>"
+            "</tr>",
+            "  </table>",
+            "  <table>",
+            "    <tr><th>Queue Size</th><th>Selected</th><th>Skipped</th><th>Success Rate</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{summary.extraction_queue_size}</td>"
+            f"<td class=\"num\">{summary.extraction_selected_count}</td>"
+            f"<td class=\"num\">{summary.extraction_skipped_count}</td>"
+            f"<td class=\"num\">{summary.extraction_success_rate:.1%}</td>"
             "</tr>",
             "  </table>",
             _failure_reasons_html(summary.top_extraction_failure_reasons),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, is_dataclass
+from datetime import date
 import json
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
@@ -16,6 +17,7 @@ from .article_fetch import (
     disabled_article_fetch_summary,
     fetch_top_cluster_articles,
 )
+from .article_types import article_type_counts, classify_article_type
 from .dedup import cluster_articles
 from .email_preview import PreviewEmailSender
 from .email_sender import (
@@ -37,8 +39,10 @@ from .provider_validation import ProviderChecker, validate_provider
 from .recency import article_recency, recency_weight
 from .reporting import (
     ArticleLink,
+    BackendArticlePoolSummary,
     DailyReportInput,
     DailyReportContract,
+    EmailDisplaySummary,
     EmergingNameRow,
     EventClusterRow,
     ExtractionSummary,
@@ -48,6 +52,7 @@ from .reporting import (
     WatchlistForecastRow,
     build_daily_report,
 )
+from .sentiment_coverage import build_weighted_sentiment_coverage
 from .sentiment import analyze_sentiment
 from .source_quality import (
     DEFAULT_MIN_SOURCE_QUALITY_TIER,
@@ -71,6 +76,7 @@ from .sources.rss_config import (
 from .sources.rss import RssSource
 from .storage import SQLiteStore, initialize_database
 from .summaries import MarketIntelligence, build_market_intelligence
+from .ticker_matching import assess_ticker_matches, confidence_summary
 from .tickers import TrackedTicker, load_portfolio, load_tracked_tickers, load_watchlist, match_tickers
 
 
@@ -80,6 +86,8 @@ class FakeProvider(Protocol):
 
 
 DEFAULT_RSS_FIXTURES_DIR = Path("tests/fixtures/rss")
+DEFAULT_MAX_EMAIL_STORIES = 60
+DEFAULT_MAX_RANKED_READS_PER_TICKER = 3
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -279,24 +287,26 @@ def main(
                     else [],
                 },
             )
-            clusters = cluster_articles(articles)
-            enriched_articles_by_url, article_fetch_summary = _run_article_fetch_stage(args, clusters)
+            discovery_clusters = cluster_articles(articles)
+            enriched_articles_by_url, article_fetch_summary = _run_article_fetch_stage(args, discovery_clusters)
             articles_for_storage = [_enriched_article(article, enriched_articles_by_url) for article in articles]
-            canonical_articles = [
-                _enriched_article(cluster.canonical_article, enriched_articles_by_url)
-                for cluster in clusters
-            ]
+            clusters = cluster_articles(articles_for_storage)
             market_intelligence = build_market_intelligence(
                 articles=articles_for_storage,
                 clusters=clusters,
                 run_date=args.run_date,
             )
+            backend_sentiment_inputs, ticker_sentiment_coverage = build_weighted_sentiment_coverage(
+                articles=articles_for_storage,
+                clusters=clusters,
+                run_date=args.run_date,
+            )
             persisted_article_ids = _persist_run_articles(store, run_id, articles_for_storage)
-            scores = _score_articles(canonical_articles)
+            scores = _score_articles(articles_for_storage)
             sentiment_basis_counts = _score_dict_basis_counts(scores)
             _persist_article_extractions(store, run_id, article_fetch_summary, persisted_article_ids)
             _persist_dedupe_clusters(store, run_id, clusters, args.run_date)
-            _persist_sentiment_and_mentions(store, run_id, canonical_articles)
+            _persist_sentiment_and_mentions(store, run_id, articles_for_storage)
 
             store.record_run(
                 RunResult(
@@ -318,6 +328,23 @@ def main(
                     data_source_label=_data_source_label(args),
                     show_excluded_source_diagnostics=args.show_excluded_source_diagnostics,
                     market_intelligence=market_intelligence,
+                    backend_article_pool_summary=BackendArticlePoolSummary(
+                        backend_candidate_articles=len(collected_articles),
+                        backend_visible_articles=len(articles_for_storage),
+                        backend_scored_articles=len({item.canonical_url for item in backend_sentiment_inputs}),
+                        backend_extracted_articles=sum(1 for article in articles_for_storage if article.full_text),
+                    ),
+                    source_coverage_diagnostics={
+                        "live_rss": live_rss_summary,
+                        "source_quality": source_quality_filter.summary.as_dict(),
+                    },
+                    dedupe_diagnostics=_dedupe_diagnostics(articles_for_storage, clusters),
+                    ticker_match_confidence_summary=confidence_summary(articles_for_storage),
+                    article_type_count_summary=article_type_counts(articles_for_storage),
+                    ticker_sentiment_coverage=ticker_sentiment_coverage,
+                    backend_sentiment_inputs=backend_sentiment_inputs,
+                    max_email_stories=max(1, int(args.max_email_stories)),
+                    max_ranked_reads_per_ticker=max(1, int(args.max_ranked_reads_per_ticker)),
                 ),
                 artifacts_dir=args.artifacts_dir,
             )
@@ -367,6 +394,22 @@ def main(
             "extraction_failure_reason": article_fetch_summary.extraction_failure_reason,
             "extractor_diagnostics": article_fetch_summary.extractor_diagnostics or {},
             "sentiment_basis_counts": sentiment_basis_counts,
+            "backend_candidate_articles": len(collected_articles),
+            "backend_visible_articles": len(articles_for_storage),
+            "backend_scored_articles": len({item.canonical_url for item in backend_sentiment_inputs}),
+            "backend_extracted_articles": sum(1 for article in articles_for_storage if article.full_text),
+            "email_visible_stories": report.email_display_summary.email_visible_stories,
+            "email_visible_ranked_reads": report.email_display_summary.email_visible_ranked_reads,
+            "article_type_counts": dict(report.article_type_counts),
+            "ticker_match_confidence_summary": dict(report.ticker_match_confidence_summary),
+            "ticker_sentiment_coverage": {
+                ticker: _dataclass_to_dict(row)
+                for ticker, row in report.ticker_sentiment_coverage.items()
+            },
+            "extraction_queue_size": article_fetch_summary.extraction_queue_size,
+            "extraction_selected_count": article_fetch_summary.extraction_selected_count,
+            "extraction_skipped_count": article_fetch_summary.extraction_skipped_count,
+            "extraction_success_rate": article_fetch_summary.extraction_success_rate,
             "output_dir": report.output_dir,
             "html_preview_report": report.html_preview_report,
             "email_preview_html": email_preview.html_preview_path,
@@ -383,7 +426,7 @@ def main(
 
 
 def _add_safe_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--run-date", required=True)
+    parser.add_argument("--run-date", default=_today_local_iso())
     parser.add_argument("--artifacts-dir", default="artifacts")
     parser.add_argument("--rss-fixtures-dir", default=str(DEFAULT_RSS_FIXTURES_DIR))
     parser.add_argument("--include-fixtures", action="store_true")
@@ -398,9 +441,33 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--live-rss-timeout-seconds", type=float, default=DEFAULT_LIVE_RSS_TIMEOUT_SECONDS)
     parser.add_argument("--live-rss-retries", type=int, default=DEFAULT_LIVE_RSS_RETRIES)
     parser.add_argument("--live-rss-user-agent", default=DEFAULT_LIVE_RSS_USER_AGENT)
-    parser.add_argument("--live-rss-max-articles-per-source", type=int, default=DEFAULT_MAX_ARTICLES_PER_SOURCE)
-    parser.add_argument("--live-rss-max-articles-per-ticker", type=int, default=DEFAULT_MAX_ARTICLES_PER_TICKER)
-    parser.add_argument("--live-rss-max-total-articles", type=int, default=DEFAULT_MAX_TOTAL_LIVE_ARTICLES)
+    parser.add_argument(
+        "--max-articles-per-source",
+        "--live-rss-max-articles-per-source",
+        dest="live_rss_max_articles_per_source",
+        type=int,
+        default=DEFAULT_MAX_ARTICLES_PER_SOURCE,
+    )
+    parser.add_argument(
+        "--max-articles-per-ticker",
+        "--live-rss-max-articles-per-ticker",
+        dest="live_rss_max_articles_per_ticker",
+        type=int,
+        default=DEFAULT_MAX_ARTICLES_PER_TICKER,
+    )
+    parser.add_argument(
+        "--max-total-live-articles",
+        "--live-rss-max-total-articles",
+        dest="live_rss_max_total_articles",
+        type=int,
+        default=DEFAULT_MAX_TOTAL_LIVE_ARTICLES,
+    )
+    parser.add_argument("--max-email-stories", type=int, default=DEFAULT_MAX_EMAIL_STORIES)
+    parser.add_argument(
+        "--max-ranked-reads-per-ticker",
+        type=int,
+        default=DEFAULT_MAX_RANKED_READS_PER_TICKER,
+    )
 
 
 def _add_live_article_fetch_args(parser: argparse.ArgumentParser) -> None:
@@ -417,7 +484,7 @@ def _add_source_quality_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_send_daily_report_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--run-date", required=True)
+    parser.add_argument("--run-date", default=_today_local_iso())
     parser.add_argument("--artifacts-dir", default="artifacts")
     parser.add_argument("--to")
     parser.add_argument("--confirm-send", action="store_true", default=False)
@@ -442,7 +509,18 @@ def _safe_context(args: argparse.Namespace) -> dict[str, object]:
         "fixtures_included": bool(getattr(args, "include_fixtures", False)) or not bool(getattr(args, "enable_live_rss", False)),
         "output_dir": str(_run_output_dir(args.artifacts_dir, args.run_date)),
         "rss_fixtures_dir": getattr(args, "rss_fixtures_dir", ""),
+        "max_total_live_articles": int(getattr(args, "live_rss_max_total_articles", DEFAULT_MAX_TOTAL_LIVE_ARTICLES)),
+        "max_articles_per_ticker": int(getattr(args, "live_rss_max_articles_per_ticker", DEFAULT_MAX_ARTICLES_PER_TICKER)),
+        "max_articles_per_source": int(getattr(args, "live_rss_max_articles_per_source", DEFAULT_MAX_ARTICLES_PER_SOURCE)),
+        "max_email_stories": int(getattr(args, "max_email_stories", DEFAULT_MAX_EMAIL_STORIES)),
+        "max_ranked_reads_per_ticker": int(
+            getattr(args, "max_ranked_reads_per_ticker", DEFAULT_MAX_RANKED_READS_PER_TICKER)
+        ),
     }
+
+
+def _today_local_iso() -> str:
+    return date.today().isoformat()
 
 
 def _send_daily_report(
@@ -727,6 +805,8 @@ def _article_to_dict(article: Article, run_date: str | None = None) -> dict[str,
         if run_date
         else None
     )
+    classification = classify_article_type(article)
+    ticker_matches = assess_ticker_matches(article)
     payload = {
         "canonical_url": article.canonical_url,
         "title": article.title,
@@ -736,6 +816,20 @@ def _article_to_dict(article: Article, run_date: str | None = None) -> dict[str,
         "snippet": article.snippet,
         "has_full_text": bool(article.full_text),
         "metadata": article.metadata,
+        "article_type": classification.primary_type,
+        "article_types": list(classification.event_types),
+        "ticker_matches": [
+            {
+                "ticker": match.ticker,
+                "ticker_match_confidence": match.confidence,
+                "ticker_match_confidence_label": match.confidence_label,
+                "ticker_match_reason": match.reason,
+                "ticker_match_basis": match.basis,
+                "primary": match.primary,
+                "related": match.related,
+            }
+            for match in ticker_matches
+        ],
     }
     if recency is not None:
         payload.update(
@@ -848,6 +942,15 @@ def _daily_report_input_from_store(
     data_source_label: str = "local RSS fixtures",
     show_excluded_source_diagnostics: bool = False,
     market_intelligence: MarketIntelligence | None = None,
+    backend_article_pool_summary: BackendArticlePoolSummary | None = None,
+    source_coverage_diagnostics: Mapping[str, object] | None = None,
+    dedupe_diagnostics: Mapping[str, object] | None = None,
+    ticker_match_confidence_summary: Mapping[str, object] | None = None,
+    article_type_count_summary: Mapping[str, int] | None = None,
+    ticker_sentiment_coverage: Mapping[str, object] | None = None,
+    backend_sentiment_inputs: Sequence[object] = (),
+    max_email_stories: int = DEFAULT_MAX_EMAIL_STORIES,
+    max_ranked_reads_per_ticker: int = DEFAULT_MAX_RANKED_READS_PER_TICKER,
 ) -> DailyReportInput:
     articles_by_id = {str(row["article_id"]): row for row in store.list_run_articles(run_id)}
     sources_by_article: dict[str, dict[str, object]] = {}
@@ -880,23 +983,42 @@ def _daily_report_input_from_store(
                 "source": sources_by_article.get(article_id, {}),
                 "score": sentiments_by_article[article_id],
                 "basis": mention["basis"],
+                "match_confidence": float(mention.get("confidence") or 0.0),
                 "recency": _row_recency(run_date, articles_by_id[article_id]),
             }
         )
 
-    event_clusters_by_ticker = _event_clusters_by_ticker_from_store(
+    backend_event_clusters_by_ticker = _event_clusters_by_ticker_from_store(
         store,
         run_id,
         extractions_by_article,
         market_intelligence=market_intelligence,
     )
+    event_clusters_by_ticker = _cap_event_clusters(
+        backend_event_clusters_by_ticker,
+        max_email_stories=max_email_stories,
+    )
+    ranked_reads_by_ticker = _cap_ranked_reads(
+        market_intelligence.ranked_reads_by_ticker if market_intelligence else {},
+        max_ranked_reads_per_ticker=max_ranked_reads_per_ticker,
+    )
     article_links = _article_links_from_event_clusters(event_clusters_by_ticker)
     portfolio_rows = tuple(
-        _sentiment_row_from_stored(ticker, mentions_by_ticker.get(ticker.symbol, ()), event_clusters_by_ticker.get(ticker.symbol, ()))
+        _sentiment_row_from_stored(
+            ticker,
+            mentions_by_ticker.get(ticker.symbol, ()),
+            event_clusters_by_ticker.get(ticker.symbol, ()),
+            coverage=(ticker_sentiment_coverage or {}).get(ticker.symbol),
+        )
         for ticker in load_portfolio()
     )
     watchlist_sentiment_rows = tuple(
-        _sentiment_row_from_stored(ticker, mentions_by_ticker.get(ticker.symbol, ()), event_clusters_by_ticker.get(ticker.symbol, ()))
+        _sentiment_row_from_stored(
+            ticker,
+            mentions_by_ticker.get(ticker.symbol, ()),
+            event_clusters_by_ticker.get(ticker.symbol, ()),
+            coverage=(ticker_sentiment_coverage or {}).get(ticker.symbol),
+        )
         for ticker in load_watchlist()
     )
     watchlist_rows = tuple(
@@ -942,7 +1064,7 @@ def _daily_report_input_from_store(
         )
         if market_intelligence
         else (),
-        ranked_reads_by_ticker=market_intelligence.ranked_reads_by_ticker if market_intelligence else {},
+        ranked_reads_by_ticker=ranked_reads_by_ticker,
         article_summaries=market_intelligence.article_summaries if market_intelligence else (),
         extraction_summary=_extraction_summary_from_fetch_summary(
             article_fetch_summary,
@@ -952,6 +1074,20 @@ def _daily_report_input_from_store(
             show_excluded_source_diagnostics=show_excluded_source_diagnostics,
         ),
         data_source_label=data_source_label,
+        backend_article_pool_summary=backend_article_pool_summary or BackendArticlePoolSummary(),
+        source_coverage_diagnostics=source_coverage_diagnostics or {},
+        extraction_coverage_diagnostics=(article_fetch_summary.as_dict() if article_fetch_summary else {}),
+        dedupe_diagnostics=dedupe_diagnostics or {},
+        ticker_match_confidence_summary=ticker_match_confidence_summary or {},
+        article_type_counts=article_type_count_summary or {},
+        ticker_sentiment_coverage=ticker_sentiment_coverage or {},
+        email_display_summary=EmailDisplaySummary(
+            email_visible_stories=sum(len(rows) for rows in event_clusters_by_ticker.values()),
+            email_visible_ranked_reads=sum(len(rows) for rows in ranked_reads_by_ticker.values()),
+            max_email_stories=max_email_stories,
+            max_ranked_reads_per_ticker=max_ranked_reads_per_ticker,
+        ),
+        backend_sentiment_inputs=tuple(backend_sentiment_inputs),
     )
 
 
@@ -1077,6 +1213,54 @@ def _article_links_from_event_clusters(
     return links_by_ticker
 
 
+def _cap_event_clusters(
+    clusters_by_ticker: Mapping[str, tuple[EventClusterRow, ...]],
+    *,
+    max_email_stories: int,
+) -> dict[str, tuple[EventClusterRow, ...]]:
+    ordered = sorted(
+        (
+            cluster
+            for clusters in clusters_by_ticker.values()
+            for cluster in clusters
+        ),
+        key=lambda cluster: (
+            -cluster.ranking_score,
+            cluster.source_quality_label,
+            -cluster.publisher_count,
+            cluster.title,
+        ),
+    )
+    grouped: dict[str, list[EventClusterRow]] = {}
+    selected_count = 0
+    for cluster in ordered:
+        if selected_count >= max(1, max_email_stories):
+            break
+        if len(grouped.get(cluster.ticker, ())) >= 3:
+            continue
+        grouped.setdefault(cluster.ticker, []).append(cluster)
+        selected_count += 1
+    return {
+        ticker: tuple(rows)
+        for ticker, rows in grouped.items()
+    }
+
+
+def _cap_ranked_reads(
+    reads_by_ticker: Mapping[str, tuple[object, ...]],
+    *,
+    max_ranked_reads_per_ticker: int,
+) -> dict[str, tuple[object, ...]]:
+    return {
+        ticker: tuple(
+            read
+            for read in reads
+            if getattr(read, "reading_priority", "background_only") != "background_only"
+        )[: max(1, max_ranked_reads_per_ticker)]
+        for ticker, reads in reads_by_ticker.items()
+    }
+
+
 def _extraction_summary_from_fetch_summary(
     article_fetch_summary: ArticleFetchSummary | None,
     extractions_by_article: Mapping[str, Mapping[str, object]],
@@ -1103,6 +1287,13 @@ def _extraction_summary_from_fetch_summary(
             extractor_diagnostics=article_fetch_summary.extractor_diagnostics or {},
             source_quality_summary=quality_summary,
             show_excluded_source_diagnostics=show_excluded_source_diagnostics,
+            extraction_queue_size=article_fetch_summary.extraction_queue_size,
+            extraction_selected_count=article_fetch_summary.extraction_selected_count,
+            extraction_skipped_count=article_fetch_summary.extraction_skipped_count,
+            extraction_skipped_reasons=article_fetch_summary.extraction_skipped_reasons,
+            extraction_success_rate=article_fetch_summary.extraction_success_rate,
+            extraction_success_rate_by_publisher=article_fetch_summary.extraction_success_rate_by_publisher,
+            extraction_success_rate_by_source_provider=article_fetch_summary.extraction_success_rate_by_source_provider,
         )
     fetched_count = sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0))
     success_count = sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text")
@@ -1125,10 +1316,13 @@ def _sentiment_row_from_stored(
     ticker: TrackedTicker,
     items: Sequence[dict[str, object]],
     event_clusters: Sequence[EventClusterRow],
+    *,
+    coverage: object | None = None,
 ) -> PortfolioSentimentRow:
     usable_items = [
         item
         for item in items
+        if float(item.get("match_confidence", 1.0)) >= 0.4
         if item["recency"].recency_bucket in {"today_signal", "recent_pulse", "weekly_trend", "background_context"}
     ]
     bucket_scores = {
@@ -1160,7 +1354,11 @@ def _sentiment_row_from_stored(
         recent_pulse_sentiment=bucket_scores["recent_pulse"],
         weekly_trend_sentiment=bucket_scores["weekly_trend"],
         background_context_sentiment=bucket_scores["background_context"],
-        weighted_sentiment_score=_weighted_sentiment_score(usable_items),
+        weighted_sentiment_score=(
+            float(getattr(coverage, "weighted_sentiment"))
+            if coverage is not None
+            else _weighted_sentiment_score(usable_items)
+        ),
         article_count_24h=article_count_24h,
         article_count_3d=article_count_3d,
         article_count_7d=article_count_7d,
@@ -1318,13 +1516,13 @@ def _persist_sentiment_and_mentions(store: SQLiteStore, run_id: str, articles: S
             _article_basis(article),
         )
         store.add_sentiment_result(sentiment, run_id=run_id)
-        for ticker in match_tickers(_article_text(article)):
-            tracked = ticker_lookup[ticker.symbol]
+        for match in assess_ticker_matches(article):
+            tracked = ticker_lookup[match.ticker]
             store.add_ticker_mention(
                 TickerMention(
                     article_id=article_id,
-                    ticker=ticker.symbol,
-                    confidence=1.0,
+                    ticker=match.ticker,
+                    confidence=match.confidence,
                     company_name=tracked.company_name,
                     basis=sentiment.basis,
                 ),
@@ -1562,6 +1760,34 @@ def _cluster_to_dict(cluster, run_date: str) -> dict[str, object]:
         "supporting_links": [_dataclass_to_dict(link) for link in cluster.supporting_links],
         "alternate_source_links": list(cluster.alternate_source_links),
         "duplicate_reasons": list(cluster.duplicate_reasons),
+        "cluster_id": cluster.cluster_id,
+        "primary_ticker": cluster.primary_ticker,
+        "matched_tickers": list(cluster.matched_tickers),
+        "related_tickers": list(cluster.related_tickers),
+        "event_type": cluster.event_type,
+        "primary_article_id": cluster.primary_article_id,
+        "supporting_article_ids": list(cluster.supporting_article_ids),
+        "supporting_publishers": list(cluster.supporting_publishers),
+        "source_diversity": cluster.source_diversity,
+        "publisher_diversity": cluster.publisher_diversity,
+    }
+
+
+def _dedupe_diagnostics(
+    articles: Sequence[Article],
+    clusters: Sequence[object],
+) -> dict[str, object]:
+    reason_counts: dict[str, int] = {}
+    for cluster in clusters:
+        for reason in cluster.duplicate_reasons:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return {
+        "input_article_count": len(articles),
+        "cluster_count": len(clusters),
+        "duplicate_article_count": max(0, len(articles) - len(clusters)),
+        "duplicate_reason_counts": reason_counts,
+        "multi_publisher_cluster_count": sum(1 for cluster in clusters if cluster.publisher_count > 1),
+        "multi_source_cluster_count": sum(1 for cluster in clusters if cluster.source_count > 1),
     }
 
 
@@ -1571,13 +1797,7 @@ def _write_markdown_report(report: DailyReportContract) -> str:
     lines = [
         f"# Portfolio and Watchlist Market Briefing - {report.report_date}",
         "",
-        "Sentiment is deterministic placeholder logic until a stronger model is wired in. "
-        "Summaries are generated from extracted full text when available, otherwise snippets or titles. "
-        "Direction rows are not predictions. This report is not investment advice.",
-        "",
-        f"Data source: {report.data_source_label}. No paid APIs were called and no email was sent.",
-        "",
-        report.daily_summary,
+        "This briefing is not investment advice. Direction rows are not predictions.",
         "",
         *_markdown_daily_briefing(report),
         "",
@@ -1588,6 +1808,8 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         *_markdown_stories_to_watch(report),
         "",
         *_markdown_ranked_reads(report),
+        "",
+        *_markdown_sentiment_coverage(report),
         "",
         *_markdown_recency_sections(report),
         "",
@@ -1762,6 +1984,25 @@ def _markdown_ranked_reads(report: DailyReportContract) -> list[str]:
     return lines
 
 
+def _markdown_sentiment_coverage(report: DailyReportContract) -> list[str]:
+    lines = [
+        "## Sentiment Coverage Summary",
+        "",
+        "| Ticker | Coverage | Weighted Sentiment | Scored | Full Text | Snippets | High Confidence | Low Confidence |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    rows = [row for row in report.ticker_sentiment_coverage.values() if row.article_count_scored]
+    if not rows:
+        return [*lines, "| none | weak | 0.0000 | 0 | 0 | 0 | 0 | 0 |"]
+    lines.extend(
+        f"| {row.ticker} | {row.sentiment_coverage_grade} | {row.weighted_sentiment:.4f} | "
+        f"{row.article_count_scored} | {row.full_text_scored_count} | {row.snippet_scored_count} | "
+        f"{row.high_confidence_article_count} | {row.low_confidence_article_count} |"
+        for row in sorted(rows, key=lambda item: item.ticker)
+    )
+    return lines
+
+
 def _markdown_read_more(report: DailyReportContract) -> list[str]:
     lines = ["## Read More By Ticker", ""]
     linked = False
@@ -1783,8 +2024,31 @@ def _markdown_read_more(report: DailyReportContract) -> list[str]:
 
 
 def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
+    warnings = " ".join(report.report_warnings) or "none"
+    backend = report.backend_article_pool_summary
+    email = report.email_display_summary
     return [
         "## Source and Extraction Diagnostics",
+        "",
+        "| Report Diagnostic | Value |",
+        "| --- | --- |",
+        f"| Run date | {report.report_date} |",
+        f"| Data source | {_escape_markdown(report.data_source_label)} |",
+        "| Delivery mode | local report only; no email sent |",
+        "| Paid API status | disabled |",
+        f"| Warnings | {_escape_markdown(warnings)} |",
+        f"| Report summary | {_escape_markdown(report.daily_summary)} |",
+        "",
+        "Sentiment is deterministic placeholder logic until a stronger model is wired in. "
+        "Summaries use extracted full text when available, otherwise snippets or titles.",
+        "",
+        "### Backend and Email Pool Summary",
+        "",
+        "| Backend Candidates | Backend Visible | Backend Scored | Backend Full Text | Email Stories | Email Ranked Reads |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: |",
+        f"| {backend.backend_candidate_articles} | {backend.backend_visible_articles} | "
+        f"{backend.backend_scored_articles} | {backend.backend_extracted_articles} | "
+        f"{email.email_visible_stories} | {email.email_visible_ranked_reads} |",
         "",
         "### Source Quality Summary",
         "",
@@ -1805,6 +2069,10 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
         "| Extraction Diagnostic | Value |",
         "| --- | --- |",
         *_markdown_extraction_diagnostic_rows(report.extraction_summary),
+        f"| extraction_queue_size | {report.extraction_summary.extraction_queue_size} |",
+        f"| extraction_selected_count | {report.extraction_summary.extraction_selected_count} |",
+        f"| extraction_skipped_count | {report.extraction_summary.extraction_skipped_count} |",
+        f"| extraction_success_rate | {report.extraction_summary.extraction_success_rate:.4f} |",
         "",
         *_markdown_failure_reason_rows(report.extraction_summary),
     ]

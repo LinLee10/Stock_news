@@ -284,6 +284,48 @@ class DedupTests(unittest.TestCase):
 
         self.assertEqual(len(clusters), 2)
 
+    def test_multi_ticker_roundup_does_not_merge_with_ticker_specific_story(self):
+        clusters = cluster_articles(
+            [
+                Article(
+                    canonical_url="https://publisher-a.com/nvidia-roundup",
+                    title="NVIDIA, AMD and Marvell stocks to watch after AI rally",
+                    snippet="A semiconductor sector roundup.",
+                    published_at="2026-06-08T10:00:00+00:00",
+                ),
+                Article(
+                    canonical_url="https://publisher-b.com/nvidia-rally",
+                    title="NVIDIA stock rallies after AI demand update",
+                    snippet="NVIDIA shares rose on company-specific demand news.",
+                    published_at="2026-06-08T10:05:00+00:00",
+                ),
+            ],
+            title_threshold=0.5,
+        )
+
+        self.assertEqual(len(clusters), 2)
+
+    def test_analyst_target_note_does_not_merge_with_earnings_story(self):
+        clusters = cluster_articles(
+            [
+                Article(
+                    canonical_url="https://publisher-a.com/nvidia-target",
+                    title="NVIDIA analyst raises price target after results",
+                    snippet="The analyst updated a rating.",
+                    published_at="2026-06-08T10:00:00+00:00",
+                ),
+                Article(
+                    canonical_url="https://publisher-b.com/nvidia-results",
+                    title="NVIDIA reports earnings results and record revenue",
+                    snippet="The company reported quarterly results.",
+                    published_at="2026-06-08T10:05:00+00:00",
+                ),
+            ],
+            title_threshold=0.5,
+        )
+
+        self.assertEqual(len(clusters), 2)
+
     def test_supporting_links_preserve_publisher_and_provider_names(self):
         clusters = cluster_articles(
             [

@@ -26,7 +26,11 @@ class ReportingTests(unittest.TestCase):
             self.assertTrue(output_dir.exists())
             self.assertEqual(len(report.csv_attachments), 6)
             self.assertEqual(len(report.chart_attachments), 3)
-            for attachment in report.csv_attachments + report.chart_attachments:
+            for attachment in (
+                report.csv_attachments
+                + report.chart_attachments
+                + report.supplemental_csv_artifacts
+            ):
                 path = Path(attachment)
                 self.assertTrue(path.exists())
                 self.assertTrue(path.is_relative_to(output_dir))
@@ -75,7 +79,7 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("Portfolio and Watchlist Market Briefing", html)
             self.assertIn("Stories to Watch", html)
             self.assertIn("Read More By Ticker", html)
-            self.assertIn("This report is not investment advice", html)
+            self.assertIn("This briefing is not investment advice", html)
             self.assertIn("deterministic placeholder logic", html)
             self.assertIn("+5 more links in JSON artifacts", html)
             self.assertIn("Event 4", html)
@@ -84,6 +88,15 @@ class ReportingTests(unittest.TestCase):
             self.assertLess(html.index("Stories to Watch"), html.index("Read More By Ticker"))
             self.assertLess(html.index("Read More By Ticker"), html.index("Source Quality Summary"))
 
+    def test_report_warns_when_run_date_differs_from_current_date(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report = build_daily_report(_fake_report_input(), artifacts_dir=Path(temp_dir))
+            html = Path(report.html_preview_report).read_text(encoding="utf-8")
+
+            self.assertIn("Run date differs from current date.", report.report_warnings)
+            self.assertIn("Run date differs from current date.", html)
+            self.assertGreater(html.index("Run date differs from current date."), html.index("Read More By Ticker"))
+
     def test_default_output_dir_is_repo_artifacts_runs_not_root(self):
         report = build_daily_report(_fake_report_input(), artifacts_dir="artifacts")
         output_dir = Path(report.output_dir)
@@ -91,7 +104,11 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(output_dir.parts[:2], ("artifacts", "runs"))
             self.assertEqual(output_dir.name, "2026-06-03")
         finally:
-            for attachment in report.csv_attachments + report.chart_attachments:
+            for attachment in (
+                report.csv_attachments
+                + report.chart_attachments
+                + report.supplemental_csv_artifacts
+            ):
                 Path(attachment).unlink(missing_ok=True)
             Path(report.html_preview_report).unlink(missing_ok=True)
             output_dir.rmdir()

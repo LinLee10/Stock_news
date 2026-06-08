@@ -1,5 +1,6 @@
 import contextlib
 import csv
+from datetime import date
 import io
 import json
 import tempfile
@@ -73,6 +74,14 @@ class FakeProvider:
 
     def articles(self):
         return [self.article]
+
+
+class ListProvider:
+    def __init__(self, articles):
+        self._articles = list(articles)
+
+    def articles(self):
+        return list(self._articles)
 
 
 class FakeHttpResponse:
@@ -221,7 +230,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("NVDA", contract["supporting_article_links"])
             self.assertTrue(contract["supporting_article_links"]["NVDA"])
             self.assertIn("https://example.com/news/nvidia-new-chip", markdown)
-            self.assertIn("Data source: local RSS fixtures", markdown)
+            self.assertIn("| Data source | local RSS fixtures |", markdown)
             self.assertIn("Placeholder direction logic", markdown)
             self.assertIn("Watchlist Recency Sentiment", html)
             self.assertIn("Portfolio and Watchlist Market Briefing", html)
@@ -229,7 +238,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("Read More By Ticker", html)
             self.assertLess(html.index("Stories to Watch"), html.index("Read More By Ticker"))
             self.assertIn(
-                "Summaries are generated from extracted full text when available, otherwise snippets or titles.",
+                "Summaries use extracted full text when available, otherwise snippets or titles.",
                 html,
             )
             self.assertTrue(Path(contract["html_preview_report"]).exists())
@@ -343,6 +352,8 @@ class CliTests(unittest.TestCase):
             self.assertLess(preview.index("Daily Briefing"), preview.index("Source Quality Summary"))
             self.assertLess(preview.index("Stories to Watch"), preview.index("Read More By Ticker"))
             self.assertLess(preview.index("Read More By Ticker"), preview.index("Source Quality Summary"))
+            self.assertLess(preview.index("Daily Briefing"), preview.index("Preview only:"))
+            self.assertLess(preview.index("Daily Briefing"), preview.index("<td>Data source</td>"))
             self.assertIn("Intended Attachments", preview)
             self.assertIn("portfolio_30d_sentiment.csv", preview)
             self.assertNotIn("watchlist_sentiment.svg", preview)
@@ -361,6 +372,25 @@ class CliTests(unittest.TestCase):
             self.assertFalse(payload["live_rss_enabled"])
             self.assertFalse(provider_validation["live_rss"]["enabled"])
             self.assertEqual(provider_validation["live_rss"]["attempt_count"], 0)
+
+    def test_dry_run_daily_defaults_run_date_to_today(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "dry-run-daily",
+                        "--artifacts-dir",
+                        str(Path(temp_dir) / "artifacts"),
+                    ],
+                    environ={},
+                )
+            payload = json.loads(stdout.getvalue())
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["run_date"], date.today().isoformat())
+            self.assertEqual(Path(payload["output_dir"]).name, date.today().isoformat())
+            self.assertEqual(payload["email_sending"], "preview_only")
 
     def test_dry_run_daily_live_rss_opt_in_uses_mocked_http_and_records_usage(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -626,6 +656,63 @@ class CliTests(unittest.TestCase):
                 self.assertIn(diagnostic, markdown)
                 self.assertIn(diagnostic, html)
                 self.assertIn(diagnostic, email_html)
+
+    def test_backend_pool_can_exceed_capped_email_display(self):
+        articles = [
+            Article(
+                canonical_url=f"https://example.com/story-{index}",
+                title=title,
+                snippet=f"{title} with company-specific stock context.",
+                published_at="2026-06-03T10:00:00+00:00",
+            )
+            for index, title in enumerate(
+                (
+                    "NVIDIA reports quarterly earnings",
+                    "AMD launches a new AI chip",
+                    "Meta faces an antitrust lawsuit",
+                    "Micron raises revenue guidance",
+                    "Broadcom signs a customer contract",
+                    "Palantir shares fall after results",
+                    "ASML reports stronger demand",
+                    "CoreWeave expands a data center",
+                    "Marvell analyst raises price target",
+                    "Reddit files a new SEC form",
+                    "Vertiv wins a major contract",
+                    "NVIDIA unveils a new platform",
+                )
+            )
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stdout = _run_cli(
+                "dry-run-daily",
+                temp_dir,
+                extra_args=[
+                    "--max-email-stories",
+                    "2",
+                    "--max-ranked-reads-per-ticker",
+                    "1",
+                ],
+                fake_providers={"rss": ListProvider(articles)},
+            )
+            payload = json.loads(stdout)
+            output_dir = Path(payload["output_dir"])
+            contract = json.loads(
+                (output_dir / "report_contract.json").read_text(encoding="utf-8")
+            )["report"]
+
+            self.assertGreater(
+                contract["backend_article_pool_summary"]["backend_visible_articles"],
+                contract["email_display_summary"]["email_visible_stories"],
+            )
+            self.assertLessEqual(contract["email_display_summary"]["email_visible_stories"], 2)
+            self.assertTrue(
+                all(len(rows) <= 1 for rows in contract["ranked_reads_by_ticker"].values())
+            )
+            self.assertIn("backend_articles_scored.csv", " ".join(contract["supplemental_csv_artifacts"]))
+            self.assertNotIn(
+                "backend_articles_scored.csv",
+                " ".join(contract["csv_attachments"]),
+            )
 
 
 def _run_cli(

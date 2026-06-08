@@ -70,15 +70,13 @@ def _render_email_preview(
         "<body>",
         "  <div class=\"wrap\">",
         f"    <h1>{escape(subject)}</h1>",
-        "    <div class=\"note\">Sentiment is deterministic placeholder logic until a stronger model is wired in. Summaries are generated from extracted full text when available, otherwise snippets or titles. Direction rows are not predictions. This briefing is not investment advice.</div>",
-        "    <div class=\"note\"><strong>Preview only:</strong> no live email provider was contacted.</div>",
-        f"    <p class=\"muted\"><strong>Data source:</strong> {escape(report.data_source_label)}. No paid APIs were called.</p>",
-        f"    <div class=\"summary\">{escape(report.daily_summary)}</div>",
+        "    <p class=\"muted\">This briefing is not investment advice. Direction rows are not predictions.</p>",
         _top_briefing(report),
         _ticker_summaries("Portfolio Summary", report.portfolio_summaries),
         _ticker_summaries("Watchlist Summary", report.watchlist_summaries),
         _event_clusters(report),
         _ranked_reads(report.ranked_reads_by_ticker),
+        _sentiment_coverage(report),
         _recency_sections(report),
         _sentiment_table("Portfolio Recency Sentiment", report.portfolio_30d_sentiment_table),
         _sentiment_table("Watchlist Recency Sentiment", report.watchlist_sentiment_table),
@@ -88,6 +86,8 @@ def _render_email_preview(
         _emerging_names_table(report),
         _article_links(report),
         "    <h2>Source and Extraction Diagnostics</h2>",
+        _report_metadata(report),
+        _backend_pool_summary(report),
         _source_quality_summary(report),
         _extraction_summary(report),
         _attachment_manifest(attachments),
@@ -96,6 +96,31 @@ def _render_email_preview(
         "</html>",
     ]
     return "\n".join(sections)
+
+
+def _report_metadata(report: DailyReportContract) -> str:
+    body = [
+        "    <table>",
+        "      <tr><th>Report Diagnostic</th><th>Value</th></tr>",
+        f"      <tr><td>Run date</td><td>{escape(report.report_date)}</td></tr>",
+        f"      <tr><td>Data source</td><td>{escape(report.data_source_label)}</td></tr>",
+        "      <tr><td>Delivery mode</td><td><strong>Preview only:</strong> no live email provider was contacted.</td></tr>",
+        "      <tr><td>SMTP send status</td><td>not sent</td></tr>",
+        "      <tr><td>Paid API status</td><td>disabled</td></tr>",
+        f"      <tr><td>Report summary</td><td>{escape(report.daily_summary)}</td></tr>",
+    ]
+    if report.report_warnings:
+        body.append(
+            f"      <tr><td>Warnings</td><td>{escape(' '.join(report.report_warnings))}</td></tr>"
+        )
+    body.extend(
+        [
+            "    </table>",
+            "    <p class=\"muted\">Sentiment is deterministic placeholder logic until a stronger model is wired in. "
+            "Summaries use extracted full text when available, otherwise snippets or titles.</p>",
+        ]
+    )
+    return "\n".join(body)
 
 
 def _top_briefing(report: DailyReportContract) -> str:
@@ -153,6 +178,52 @@ def _quality_caveat_bullet(report: DailyReportContract) -> str:
     )
 
 
+def _sentiment_coverage(report: DailyReportContract) -> str:
+    rows = [row for row in report.ticker_sentiment_coverage.values() if row.article_count_scored]
+    body = [
+        "    <h2>Sentiment Coverage Summary</h2>",
+        "    <table>",
+        "      <tr><th>Ticker</th><th>Coverage</th><th>Weighted Sentiment</th><th>Scored</th><th>Full Text</th><th>Snippets</th></tr>",
+    ]
+    if rows:
+        body.extend(
+            "      <tr>"
+            f"<td>{escape(row.ticker)}</td>"
+            f"<td>{escape(row.sentiment_coverage_grade)}</td>"
+            f"<td class=\"num\">{row.weighted_sentiment:.4f}</td>"
+            f"<td class=\"num\">{row.article_count_scored}</td>"
+            f"<td class=\"num\">{row.full_text_scored_count}</td>"
+            f"<td class=\"num\">{row.snippet_scored_count}</td>"
+            "</tr>"
+            for row in sorted(rows, key=lambda item: item.ticker)
+        )
+    else:
+        body.append("      <tr><td colspan=\"6\" class=\"empty\">No weighted sentiment coverage was available.</td></tr>")
+    body.append("    </table>")
+    return "\n".join(body)
+
+
+def _backend_pool_summary(report: DailyReportContract) -> str:
+    backend = report.backend_article_pool_summary
+    email = report.email_display_summary
+    return "\n".join(
+        [
+            "    <h2>Backend and Email Pool Summary</h2>",
+            "    <table>",
+            "      <tr><th>Backend Candidates</th><th>Backend Visible</th><th>Backend Scored</th><th>Backend Full Text</th><th>Email Stories</th><th>Email Ranked Reads</th></tr>",
+            "      <tr>"
+            f"<td class=\"num\">{backend.backend_candidate_articles}</td>"
+            f"<td class=\"num\">{backend.backend_visible_articles}</td>"
+            f"<td class=\"num\">{backend.backend_scored_articles}</td>"
+            f"<td class=\"num\">{backend.backend_extracted_articles}</td>"
+            f"<td class=\"num\">{email.email_visible_stories}</td>"
+            f"<td class=\"num\">{email.email_visible_ranked_reads}</td>"
+            "</tr>",
+            "    </table>",
+        ]
+    )
+
+
 def _sentiment_table(title: str, rows: tuple[object, ...]) -> str:
     body = [
         f"    <h2>{escape(title)}</h2>",
@@ -206,6 +277,15 @@ def _extraction_summary(report: DailyReportContract) -> str:
             f"<td class=\"num\">{basis_counts['full_text']}</td>"
             f"<td class=\"num\">{basis_counts['snippet']}</td>"
             f"<td class=\"num\">{basis_counts['title']}</td>"
+            "</tr>",
+            "    </table>",
+            "    <table>",
+            "      <tr><th>Queue Size</th><th>Selected</th><th>Skipped</th><th>Success Rate</th></tr>",
+            "      <tr>"
+            f"<td class=\"num\">{summary.extraction_queue_size}</td>"
+            f"<td class=\"num\">{summary.extraction_selected_count}</td>"
+            f"<td class=\"num\">{summary.extraction_skipped_count}</td>"
+            f"<td class=\"num\">{summary.extraction_success_rate:.1%}</td>"
             "</tr>",
             "    </table>",
             _failure_reasons(summary.top_extraction_failure_reasons),

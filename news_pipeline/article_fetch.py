@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import re
 from time import monotonic
@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
+from .article_types import ARTICLE_TYPE_SERIOUSNESS, classify_article_type
 from .dedup import DedupeCluster
 from .extract import extract_article, extraction_dependency_status
 from .models import Article
@@ -20,11 +21,12 @@ from .source_quality import (
     assess_article_source,
     source_quality_sort_key,
 )
-from .tickers import match_tickers
+from .ticker_matching import assess_ticker_matches
+from .tickers import load_portfolio, match_tickers
 
 
-DEFAULT_MAX_ARTICLE_FETCHES = 25
-DEFAULT_MAX_FETCHES_PER_TICKER = 2
+DEFAULT_MAX_ARTICLE_FETCHES = 75
+DEFAULT_MAX_FETCHES_PER_TICKER = 5
 DEFAULT_FETCH_TIMEOUT_SECONDS = 8.0
 DEFAULT_ARTICLE_FETCH_USER_AGENT = "StonkNewsPipeline/0.1 (+local dry-run article extraction)"
 URL_CLASS_GOOGLE_NEWS_WRAPPER = "google_news_wrapper"
@@ -58,6 +60,10 @@ class ArticleExtractionRecord:
     extraction_failure_reason: str | None
     fetched: bool
     tickers: tuple[str, ...]
+    source_publisher: str = ""
+    source_provider: str = ""
+    queue_score: float = 0.0
+    queue_reasons: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -84,7 +90,23 @@ class ArticleExtractionRecord:
             "extraction_failure_reason": self.extraction_failure_reason,
             "fetched": self.fetched,
             "tickers": list(self.tickers),
+            "source_publisher": self.source_publisher,
+            "source_provider": self.source_provider,
+            "queue_score": self.queue_score,
+            "queue_reasons": list(self.queue_reasons),
         }
+
+
+@dataclass(frozen=True)
+class ExtractionQueueItem:
+    cluster: DedupeCluster
+    article: Article
+    tickers: tuple[str, ...]
+    primary_ticker: str | None
+    score: float
+    score_reasons: tuple[str, ...]
+    eligible: bool
+    skip_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +121,10 @@ class ArticleFetchSummary:
     reason: str | None = None
     records: tuple[ArticleExtractionRecord, ...] = ()
     extractor_diagnostics: dict[str, bool] | None = None
+    extraction_queue_size: int = 0
+    extraction_selected_count: int = 0
+    extraction_skipped_count: int = 0
+    extraction_skipped_reasons: dict[str, int] = field(default_factory=dict)
 
     @property
     def basis_counts(self) -> dict[str, int]:
@@ -155,6 +181,20 @@ class ArticleFetchSummary:
             return None
         return sorted(reasons.items(), key=lambda item: (-int(item[1]), item[0]))[0][0]
 
+    @property
+    def extraction_success_rate(self) -> float:
+        if not self.extraction_selected_count:
+            return 0.0
+        return round(self.successful_extractions / self.extraction_selected_count, 4)
+
+    @property
+    def extraction_success_rate_by_publisher(self) -> dict[str, float]:
+        return _success_rates(self.records, "source_publisher")
+
+    @property
+    def extraction_success_rate_by_source_provider(self) -> dict[str, float]:
+        return _success_rates(self.records, "source_provider")
+
     def as_dict(self) -> dict[str, object]:
         return {
             "enabled": self.enabled,
@@ -175,6 +215,16 @@ class ArticleFetchSummary:
             "extraction_method_counts": self.extraction_method_counts,
             "extraction_failure_reason": self.extraction_failure_reason,
             "extractor_diagnostics": self.extractor_diagnostics or extraction_dependency_status(),
+            "extraction_queue_size": self.extraction_queue_size,
+            "extraction_selected_count": self.extraction_selected_count,
+            "extraction_skipped_count": self.extraction_skipped_count,
+            "extraction_skipped_reasons": dict(self.extraction_skipped_reasons),
+            "extraction_success_rate": self.extraction_success_rate,
+            "extraction_success_rate_by_publisher": self.extraction_success_rate_by_publisher,
+            "extraction_success_rate_by_source_provider": self.extraction_success_rate_by_source_provider,
+            "full_text_basis_count": self.basis_counts["full_text"],
+            "snippet_basis_count": self.basis_counts["snippet"],
+            "title_basis_count": self.basis_counts["title"],
             "records": [record.as_dict() for record in self.records],
         }
 
@@ -191,25 +241,33 @@ def fetch_top_cluster_articles(
     min_source_quality_tier: int = DEFAULT_MIN_SOURCE_QUALITY_TIER,
 ) -> tuple[dict[str, Article], ArticleFetchSummary]:
     """Fetch at most one article page for selected top event clusters."""
-    max_article_fetches = max(0, min(DEFAULT_MAX_ARTICLE_FETCHES, int(max_article_fetches)))
+    max_article_fetches = max(0, int(max_article_fetches))
     max_fetches_per_ticker = max(1, int(max_fetches_per_ticker))
     fetch_timeout_seconds = max(0.1, float(fetch_timeout_seconds))
     enriched: dict[str, Article] = {}
     records: list[ArticleExtractionRecord] = []
     ticker_counts: dict[str, int] = {}
     seen_urls: set[str] = set()
-
-    for article, tickers, requested_url, fetch_url, url_classification, resolution_status, resolution_record in _iter_fetch_candidates(
+    queue = build_extraction_queue(
         tuple(clusters),
         run_date=run_date,
+        include_low_quality_sources=include_low_quality_sources,
+        min_source_quality_tier=min_source_quality_tier,
+    )
+    queue_diagnostics: dict[str, object] = {
+        "selected_count": 0,
+        "skipped_reasons": {},
+    }
+
+    for article, tickers, requested_url, fetch_url, url_classification, resolution_status, resolution_record, queue_item in _iter_fetch_candidates(
+        queue,
         max_article_fetches=max_article_fetches,
         max_fetches_per_ticker=max_fetches_per_ticker,
         fetch_timeout_seconds=fetch_timeout_seconds,
         user_agent=user_agent,
-        include_low_quality_sources=include_low_quality_sources,
-        min_source_quality_tier=min_source_quality_tier,
         ticker_counts=ticker_counts,
         seen_urls=seen_urls,
+        queue_diagnostics=queue_diagnostics,
     ):
         if resolution_record is not None:
             records.append(resolution_record)
@@ -223,6 +281,7 @@ def fetch_top_cluster_articles(
             resolution_status=resolution_status,
             timeout_seconds=fetch_timeout_seconds,
             user_agent=user_agent,
+            queue_item=queue_item,
         )
         records.append(record)
         if enriched_article is not None:
@@ -231,6 +290,8 @@ def fetch_top_cluster_articles(
     successful = sum(1 for record in records if record.fetched and record.extraction_basis == "full_text")
     fetched = sum(1 for record in records if record.fetched)
     failed = fetched - successful
+    skipped_reasons = dict(queue_diagnostics["skipped_reasons"])
+    skipped_count = sum(int(count) for count in skipped_reasons.values())
     return enriched, ArticleFetchSummary(
         enabled=True,
         attempted_fetches=fetched,
@@ -241,6 +302,10 @@ def fetch_top_cluster_articles(
         fetch_timeout_seconds=fetch_timeout_seconds,
         records=tuple(records),
         extractor_diagnostics=extraction_dependency_status(),
+        extraction_queue_size=len(queue),
+        extraction_selected_count=int(queue_diagnostics["selected_count"]),
+        extraction_skipped_count=skipped_count,
+        extraction_skipped_reasons=skipped_reasons,
     )
 
 
@@ -253,7 +318,7 @@ def disabled_article_fetch_summary(
 ) -> ArticleFetchSummary:
     return ArticleFetchSummary(
         enabled=False,
-        max_article_fetches=max(0, min(DEFAULT_MAX_ARTICLE_FETCHES, int(max_article_fetches))),
+        max_article_fetches=max(0, int(max_article_fetches)),
         max_fetches_per_ticker=max(1, int(max_fetches_per_ticker)),
         fetch_timeout_seconds=max(0.1, float(fetch_timeout_seconds)),
         reason=reason,
@@ -261,88 +326,157 @@ def disabled_article_fetch_summary(
     )
 
 
-def _iter_fetch_candidates(
-    clusters: tuple[DedupeCluster, ...],
+def build_extraction_queue(
+    clusters: tuple[DedupeCluster, ...] | list[DedupeCluster],
     *,
     run_date: str,
+    include_low_quality_sources: bool,
+    min_source_quality_tier: int,
+) -> tuple[ExtractionQueueItem, ...]:
+    portfolio_symbols = {ticker.symbol for ticker in load_portfolio()}
+    queue: list[ExtractionQueueItem] = []
+    for cluster in clusters:
+        for article in cluster.articles:
+            quality = assess_article_source(article)
+            matches = assess_ticker_matches(article)
+            usable_matches = tuple(match for match in matches if not match.related)
+            tickers = tuple(sorted(match.ticker for match in matches))
+            primary = next((match.ticker for match in matches if match.primary), cluster.primary_ticker)
+            recency = article_recency(
+                run_date=run_date,
+                published_at=article.published_at,
+                collected_at=article.created_at,
+                archive_context=bool(article.metadata.get("archive_context")),
+            )
+            classification = classify_article_type(article)
+            direct = classify_article_url(article.canonical_url) == URL_CLASS_DIRECT_PUBLISHER
+            confidence = max((match.confidence for match in usable_matches), default=0.0)
+            reasons = (
+                f"ticker_confidence={confidence:.2f}",
+                f"source_tier={quality.tier}",
+                f"recency={recency.recency_bucket}",
+                f"article_type={classification.primary_type}",
+                f"direct_publisher={str(direct).lower()}",
+                f"cluster_primary={str(article.canonical_url == cluster.canonical_article.canonical_url).lower()}",
+                f"portfolio_relevance={str(bool(set(tickers) & portfolio_symbols)).lower()}",
+            )
+            score = (
+                confidence * 40
+                + {1: 30, 2: 22, 3: 8, 4: -100}.get(quality.tier, 12)
+                + {
+                    "today_signal": 20,
+                    "recent_pulse": 14,
+                    "weekly_trend": 8,
+                    "background_context": 2,
+                }.get(recency.recency_bucket, 0)
+                + ARTICLE_TYPE_SERIOUSNESS.get(classification.primary_type, 0)
+                + (12 if direct else 0)
+                + (10 if article.canonical_url == cluster.canonical_article.canonical_url else 0)
+                + (6 if set(tickers) & portfolio_symbols else 3)
+                + min(8, cluster.publisher_diversity + cluster.source_diversity)
+            )
+            skip_reason = None
+            if not usable_matches:
+                skip_reason = "no_ticker_specific_match"
+            elif not include_low_quality_sources and (
+                quality.tier >= 3
+                or quality.tier > min(min_source_quality_tier, 2)
+            ):
+                skip_reason = "source_quality_excluded"
+            elif not _is_fetchable_url(article.canonical_url):
+                skip_reason = "unsupported_or_unknown"
+            queue.append(
+                ExtractionQueueItem(
+                    cluster=cluster,
+                    article=article,
+                    tickers=tickers,
+                    primary_ticker=primary,
+                    score=round(score, 2),
+                    score_reasons=reasons,
+                    eligible=skip_reason is None,
+                    skip_reason=skip_reason,
+                )
+            )
+    return tuple(
+        sorted(
+            queue,
+            key=lambda item: (
+                item.eligible,
+                item.score,
+                item.article.canonical_url == item.cluster.canonical_article.canonical_url,
+                item.article.canonical_url,
+            ),
+            reverse=True,
+        )
+    )
+
+
+def _iter_fetch_candidates(
+    queue: tuple[ExtractionQueueItem, ...],
+    *,
     max_article_fetches: int,
     max_fetches_per_ticker: int,
     fetch_timeout_seconds: float,
     user_agent: str,
-    include_low_quality_sources: bool,
-    min_source_quality_tier: int,
     ticker_counts: dict[str, int],
     seen_urls: set[str],
+    queue_diagnostics: dict[str, object],
 ):
     attempted_fetches = 0
-    for cluster in sorted(clusters, key=lambda item: _cluster_rank(item, run_date), reverse=True):
-        if attempted_fetches >= max_article_fetches:
-            break
-        tickers = _cluster_tickers(cluster)
-        if not tickers:
+    selected_clusters: set[str] = set()
+    skipped_reasons = queue_diagnostics["skipped_reasons"]
+    for item in queue:
+        if not item.eligible:
+            _increment(skipped_reasons, item.skip_reason or "ineligible")
             continue
-        if any(ticker_counts.get(ticker, 0) >= max_fetches_per_ticker for ticker in tickers):
+        cluster_key = item.cluster.cluster_id or item.cluster.canonical_article.canonical_url
+        if cluster_key in selected_clusters:
+            _increment(skipped_reasons, "lower_ranked_cluster_candidate")
             continue
-        for candidate_article in _cluster_fetch_articles(cluster):
-            if attempted_fetches >= max_article_fetches:
-                break
-            source_quality = assess_article_source(candidate_article)
-            if not include_low_quality_sources and (
-                source_quality.tier == TIER_4_EXCLUDE_BY_DEFAULT
-                or source_quality.tier > min_source_quality_tier
-            ):
-                yield cluster.canonical_article, tickers, candidate_article.canonical_url, None, classify_article_url(candidate_article.canonical_url), "source_quality_excluded", _skipped_record(
-                    cluster.canonical_article,
-                    tickers=tickers,
-                    reason="source_quality_excluded",
-                    url_classification=classify_article_url(candidate_article.canonical_url),
-                    requested_url=candidate_article.canonical_url,
-                    resolution_status="source_quality_excluded",
-                )
-                continue
-            if candidate_article.canonical_url in seen_urls or not _is_fetchable_url(candidate_article.canonical_url):
-                continue
-            seen_urls.add(candidate_article.canonical_url)
-            article = cluster.canonical_article
-            requested_url = candidate_article.canonical_url
-            url_classification = classify_article_url(requested_url)
-            if url_classification == URL_CLASS_UNSUPPORTED:
-                yield article, tickers, requested_url, None, url_classification, "unsupported", _skipped_record(
+        if int(queue_diagnostics["selected_count"]) >= max_article_fetches:
+            _increment(skipped_reasons, "max_article_fetches")
+            continue
+        budget_ticker = item.primary_ticker or (item.tickers[0] if item.tickers else None)
+        if budget_ticker and ticker_counts.get(budget_ticker, 0) >= max_fetches_per_ticker:
+            _increment(skipped_reasons, "max_fetches_per_ticker")
+            continue
+        candidate_article = item.article
+        if candidate_article.canonical_url in seen_urls:
+            _increment(skipped_reasons, "duplicate_url")
+            continue
+        seen_urls.add(candidate_article.canonical_url)
+        article = item.cluster.canonical_article
+        requested_url = candidate_article.canonical_url
+        url_classification = classify_article_url(requested_url)
+        queue_diagnostics["selected_count"] = int(queue_diagnostics["selected_count"]) + 1
+        selected_clusters.add(cluster_key)
+        if budget_ticker:
+            ticker_counts[budget_ticker] = ticker_counts.get(budget_ticker, 0) + 1
+        resolution_status = "direct_publisher_url"
+        fetch_url = requested_url
+        if url_classification == URL_CLASS_GOOGLE_NEWS_WRAPPER:
+            resolved = _resolve_google_news_url(
+                requested_url,
+                timeout_seconds=fetch_timeout_seconds,
+                user_agent=user_agent,
+            )
+            if resolved.resolved_url is None:
+                yield article, item.tickers, requested_url, None, url_classification, resolved.status, _skipped_record(
                     article,
-                    tickers=tickers,
-                    reason="unsupported_or_unknown",
+                    tickers=item.tickers,
+                    reason=resolved.error_class or "google_news_unresolved",
                     url_classification=url_classification,
                     requested_url=requested_url,
-                    resolution_status="unsupported",
-                )
+                    resolution_status=resolved.status,
+                    final_url=resolved.final_url,
+                    latency_ms=resolved.latency_ms,
+                    queue_item=item,
+                ), item
                 continue
-            resolution_status = "direct_publisher_url"
-            fetch_url = requested_url
-            if url_classification == URL_CLASS_GOOGLE_NEWS_WRAPPER:
-                resolved = _resolve_google_news_url(
-                    requested_url,
-                    timeout_seconds=fetch_timeout_seconds,
-                    user_agent=user_agent,
-                )
-                if resolved.resolved_url is None:
-                    yield article, tickers, requested_url, None, url_classification, resolved.status, _skipped_record(
-                        article,
-                        tickers=tickers,
-                        reason=resolved.error_class or "google_news_unresolved",
-                        url_classification=url_classification,
-                        requested_url=requested_url,
-                        resolution_status=resolved.status,
-                        final_url=resolved.final_url,
-                        latency_ms=resolved.latency_ms,
-                    )
-                    continue
-                fetch_url = resolved.resolved_url
-                resolution_status = "resolved_to_publisher"
-            attempted_fetches += 1
-            for ticker in tickers:
-                ticker_counts[ticker] = ticker_counts.get(ticker, 0) + 1
-            yield article, tickers, requested_url, fetch_url, url_classification, resolution_status, None
-            break
+            fetch_url = resolved.resolved_url
+            resolution_status = "resolved_to_publisher"
+        attempted_fetches += 1
+        yield article, item.tickers, requested_url, fetch_url, url_classification, resolution_status, None, item
 
 
 def _cluster_rank(cluster: DedupeCluster, run_date: str) -> tuple[int, int, int, int, int]:
@@ -406,6 +540,7 @@ def _fetch_and_extract(
     resolution_status: str,
     timeout_seconds: float,
     user_agent: str,
+    queue_item: ExtractionQueueItem,
 ) -> tuple[Article | None, ArticleExtractionRecord]:
     started = monotonic()
     final_url = fetch_url
@@ -432,6 +567,7 @@ def _fetch_and_extract(
                 latency_ms=int((monotonic() - started) * 1000),
                 content_type=content_type,
                 content_length=content_length,
+                queue_item=queue_item,
             )
         if not _is_html_content_type(content_type):
             return None, _fetched_failure_record(
@@ -447,6 +583,7 @@ def _fetch_and_extract(
                 latency_ms=int((monotonic() - started) * 1000),
                 content_type=content_type,
                 content_length=content_length,
+                queue_item=queue_item,
             )
         raw_html = raw_bytes.decode("utf-8", errors="replace")
         result = extract_article(
@@ -484,6 +621,10 @@ def _fetch_and_extract(
             extraction_failure_reason=extraction_failure_reason,
             fetched=True,
             tickers=tickers,
+            source_publisher=str(queue_item.article.metadata.get("source_name") or ""),
+            source_provider=str(queue_item.article.metadata.get("provider") or ""),
+            queue_score=queue_item.score,
+            queue_reasons=queue_item.score_reasons,
         )
         if result.extraction_basis == "full_text" and text:
             return _with_full_text(article, text, record), record
@@ -514,6 +655,10 @@ def _fetch_and_extract(
             extraction_failure_reason=_primary_failure_reason(_normalize_reasons(("fetch_error", type(exc).__name__, _fallback_reason(article)))),
             fetched=True,
             tickers=tickers,
+            source_publisher=str(queue_item.article.metadata.get("source_name") or ""),
+            source_provider=str(queue_item.article.metadata.get("provider") or ""),
+            queue_score=queue_item.score,
+            queue_reasons=queue_item.score_reasons,
         )
 
 
@@ -630,6 +775,7 @@ def _skipped_record(
     resolution_status: str,
     final_url: str | None = None,
     latency_ms: int = 0,
+    queue_item: ExtractionQueueItem | None = None,
 ) -> ArticleExtractionRecord:
     failure_reasons = _normalize_reasons((reason,))
     return ArticleExtractionRecord(
@@ -656,6 +802,10 @@ def _skipped_record(
         extraction_failure_reason=_primary_failure_reason(failure_reasons),
         fetched=False,
         tickers=tickers,
+        source_publisher=str(queue_item.article.metadata.get("source_name") or "") if queue_item else "",
+        source_provider=str(queue_item.article.metadata.get("provider") or "") if queue_item else "",
+        queue_score=queue_item.score if queue_item else 0.0,
+        queue_reasons=queue_item.score_reasons if queue_item else (),
     )
 
 
@@ -673,6 +823,7 @@ def _fetched_failure_record(
     latency_ms: int,
     content_type: str | None,
     content_length: int,
+    queue_item: ExtractionQueueItem | None = None,
 ) -> ArticleExtractionRecord:
     failure_reasons = _normalize_reasons((reason, _fallback_reason(article)))
     return ArticleExtractionRecord(
@@ -699,6 +850,10 @@ def _fetched_failure_record(
         extraction_failure_reason=_primary_failure_reason(failure_reasons),
         fetched=True,
         tickers=tickers,
+        source_publisher=str(queue_item.article.metadata.get("source_name") or "") if queue_item else "",
+        source_provider=str(queue_item.article.metadata.get("provider") or "") if queue_item else "",
+        queue_score=queue_item.score if queue_item else 0.0,
+        queue_reasons=queue_item.score_reasons if queue_item else (),
     )
 
 
@@ -707,6 +862,32 @@ def _is_html_content_type(content_type: str | None) -> bool:
         return True
     lowered = content_type.lower()
     return any(html_type in lowered for html_type in HTML_CONTENT_TYPES)
+
+
+def _increment(counts: object, reason: str) -> None:
+    if not isinstance(counts, dict):
+        return
+    counts[reason] = int(counts.get(reason, 0)) + 1
+
+
+def _success_rates(
+    records: tuple[ArticleExtractionRecord, ...],
+    field_name: str,
+) -> dict[str, float]:
+    totals: dict[str, int] = {}
+    successes: dict[str, int] = {}
+    for record in records:
+        if not record.fetched:
+            continue
+        key = str(getattr(record, field_name) or "unknown")
+        totals[key] = totals.get(key, 0) + 1
+        if record.extraction_basis == "full_text":
+            successes[key] = successes.get(key, 0) + 1
+    return {
+        key: round(successes.get(key, 0) / total, 4)
+        for key, total in sorted(totals.items())
+        if total
+    }
 
 
 def _failure_reasons(extraction_basis: str, extraction_error: str | None) -> tuple[str, ...]:
