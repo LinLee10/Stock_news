@@ -14,9 +14,15 @@ from news_pipeline.models import Article
 class RssSource(NewsSource):
     provider_name = "rss"
 
-    def __init__(self, feed_xml: str | None = None, provider_name: str = "rss"):
+    def __init__(
+        self,
+        feed_xml: str | None = None,
+        provider_name: str = "rss",
+        default_source_name: str | None = None,
+    ):
         self.feed_xml = feed_xml
         self.provider_name = provider_name
+        self.default_source_name = default_source_name
 
     def discover(self, symbols=None) -> list[SourceCandidate]:
         if not self.feed_xml:
@@ -37,7 +43,13 @@ class RssSource(NewsSource):
                     title=title,
                     snippet=clean_rss_snippet(item.findtext("description") or item.findtext("summary")),
                     published_at=_parse_rss_date(item.findtext("pubDate") or item.findtext("published")),
-                    source_name=(item.findtext("source") or channel_source or "").strip() or None,
+                    source_name=(
+                        item.findtext("source")
+                        or self.default_source_name
+                        or channel_source
+                        or ""
+                    ).strip()
+                    or None,
                 )
             )
         return candidates

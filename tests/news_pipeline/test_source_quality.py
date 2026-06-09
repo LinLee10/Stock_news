@@ -27,6 +27,22 @@ class FakeProvider:
 
 
 class SourceQualityTests(unittest.TestCase):
+    def test_verified_press_release_wires_are_usable_tier_two_sources(self):
+        for url, source in (
+            ("https://www.prnewswire.com/news-releases/nvidia-update.html", "PR Newswire"),
+            ("https://www.globenewswire.com/news-release/nvidia-update.html", "GlobeNewswire"),
+        ):
+            quality = assess_article_source(
+                Article(
+                    canonical_url=url,
+                    title="NVIDIA announces a company update",
+                    metadata={"source_name": source},
+                )
+            )
+
+            self.assertEqual(quality.tier, 2)
+            self.assertEqual(quality.reason, "press_release_wire")
+
     def test_source_quality_tiers_classify_known_sources(self):
         self.assertEqual(assess_article_source(_article("https://www.reuters.com/markets/nvda", "Reuters")).tier, TIER_1_HIGH_TRUST)
         self.assertEqual(assess_article_source(_article("https://finance.yahoo.com/news/nvda", "Yahoo Finance")).tier, TIER_2_USABLE)
@@ -166,7 +182,10 @@ class SourceQualityTests(unittest.TestCase):
             markdown = (output_dir / "daily_report.md").read_text(encoding="utf-8")
 
         self.assertIn("Source Quality Summary", email_html)
-        self.assertIn("free live RSS feeds", email_html)
+        self.assertIn(
+            "source-aware official, issuer, wire, publisher, and RSS acquisition",
+            email_html,
+        )
         self.assertNotIn("fixture sentiment coverage", email_html)
         self.assertNotIn("fixture sentiment coverage", markdown)
         self.assertNotIn("placeholder forecast from stored fixture sentiment", email_html)

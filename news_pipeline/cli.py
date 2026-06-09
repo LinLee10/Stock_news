@@ -14,6 +14,8 @@ from .article_fetch import (
     DEFAULT_MAX_ARTICLE_FETCHES,
     DEFAULT_MAX_FETCHES_PER_TICKER,
     ArticleFetchSummary,
+    URL_CLASS_DIRECT_PUBLISHER,
+    classify_article_url,
     disabled_article_fetch_summary,
     fetch_top_cluster_articles,
 )
@@ -69,11 +71,19 @@ from .sources.live_rss import (
     default_live_rss_urls,
 )
 from .sources.rss_config import (
+    DEFAULT_MAX_GOOGLE_NEWS_SHARE,
     DEFAULT_MAX_ARTICLES_PER_SOURCE,
     DEFAULT_MAX_ARTICLES_PER_TICKER,
     DEFAULT_MAX_TOTAL_LIVE_ARTICLES,
+    GOOGLE_NEWS_DISCOVERY,
 )
 from .sources.rss import RssSource
+from .sources.source_registry import (
+    COMPANY_IR_PROFILES,
+    GOOGLE_NEWS_BACKSTOP,
+    load_source_profiles,
+)
+from .sources.source_scheduler import schedule_sources
 from .storage import SQLiteStore, initialize_database
 from .summaries import MarketIntelligence, build_market_intelligence
 from .ticker_matching import assess_ticker_matches, confidence_summary
@@ -263,7 +273,13 @@ def main(
                 run_date=args.run_date,
             )
 
-            collected_articles, live_rss_summary = _collect_daily_articles(args, fake_providers, store, run_id)
+            collected_articles, live_rss_summary = _collect_daily_articles(
+                args,
+                fake_providers,
+                store,
+                run_id,
+                environ=environ,
+            )
             source_quality_filter = filter_articles_by_source_quality(
                 collected_articles,
                 include_low_quality_sources=args.include_low_quality_sources,
@@ -337,6 +353,7 @@ def main(
                     source_coverage_diagnostics={
                         "live_rss": live_rss_summary,
                         "source_quality": source_quality_filter.summary.as_dict(),
+                        **live_rss_summary,
                     },
                     dedupe_diagnostics=_dedupe_diagnostics(articles_for_storage, clusters),
                     ticker_match_confidence_summary=confidence_summary(articles_for_storage),
@@ -379,6 +396,9 @@ def main(
             "status": "dry_run_complete",
             "email_sending": "preview_only",
             "paid_apis": "enabled" if args.enable_paid_apis else "disabled",
+            "paid_news_apis": (
+                "enabled" if args.enable_paid_news_apis else "disabled"
+            ),
             "run_id": run_id,
             "database_path": str(database_path),
             "article_count": len(articles),
@@ -429,6 +449,23 @@ def main(
             "extraction_quality_grade_counts": article_fetch_summary.extraction_quality_grade_counts,
             "extractor_method_success_counts": article_fetch_summary.extraction_method_success_counts,
             "publisher_success_rates": article_fetch_summary.extraction_success_rate_by_publisher,
+            "extraction_candidate_direct_ratio": article_fetch_summary.extraction_candidate_direct_ratio,
+            "full_text_success_by_source_family": article_fetch_summary.full_text_success_by_source_family,
+            "direct_source_article_count": live_rss_summary.get("direct_source_article_count", 0),
+            "google_news_article_count": live_rss_summary.get("google_news_article_count", 0),
+            "direct_publisher_url_ratio": live_rss_summary.get("direct_publisher_url_ratio", 0.0),
+            "articles_by_source_family": live_rss_summary.get("articles_by_source_family", {}),
+            "source_family_counts": live_rss_summary.get("source_family_counts", {}),
+            "official_source_count": live_rss_summary.get("official_source_count", 0),
+            "company_ir_count": live_rss_summary.get("company_ir_count", 0),
+            "press_release_wire_count": live_rss_summary.get("press_release_wire_count", 0),
+            "direct_publisher_count": live_rss_summary.get("direct_publisher_count", 0),
+            "google_news_backstop_count": live_rss_summary.get("google_news_backstop_count", 0),
+            "google_news_share": live_rss_summary.get("google_news_share", 0.0),
+            "paid_api_count": live_rss_summary.get("paid_api_count", 0),
+            "paid_api_skipped_reasons": live_rss_summary.get("paid_api_skipped_reasons", {}),
+            "source_diversity_score": live_rss_summary.get("source_diversity_score", 0.0),
+            "source_balance_score": live_rss_summary.get("source_balance_score", 0.0),
             "output_dir": report.output_dir,
             "html_preview_report": report.html_preview_report,
             "email_preview_html": email_preview.html_preview_path,
@@ -451,6 +488,7 @@ def _add_safe_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--include-fixtures", action="store_true")
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--enable-paid-apis", action="store_true", default=False)
+    parser.add_argument("--enable-paid-news-apis", action="store_true", default=False)
     parser.add_argument("--enable-email-send", action="store_true", default=False)
 
 
@@ -477,16 +515,43 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--max-total-live-articles",
         "--live-rss-max-total-articles",
+        "--max-backend-articles",
         dest="live_rss_max_total_articles",
         type=int,
         default=DEFAULT_MAX_TOTAL_LIVE_ARTICLES,
     )
+    parser.add_argument("--target-backend-articles", type=int, default=250)
+    parser.add_argument("--minimum-backend-articles", type=int, default=150)
     parser.add_argument("--max-email-stories", type=int, default=DEFAULT_MAX_EMAIL_STORIES)
     parser.add_argument(
         "--max-ranked-reads-per-ticker",
         type=int,
         default=DEFAULT_MAX_RANKED_READS_PER_TICKER,
     )
+    parser.add_argument(
+        "--prefer-direct-sources",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--max-google-news-share",
+        type=float,
+        default=DEFAULT_MAX_GOOGLE_NEWS_SHARE,
+    )
+    parser.add_argument(
+        "--include-press-release-feeds",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--include-sec-feeds",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--enable-marketaux", action="store_true", default=False)
+    parser.add_argument("--enable-finnhub-news", action="store_true", default=False)
+    parser.add_argument("--enable-alpha-vantage-news", action="store_true", default=False)
+    parser.add_argument("--enable-gnews", action="store_true", default=False)
 
 
 def _add_live_article_fetch_args(parser: argparse.ArgumentParser) -> None:
@@ -519,6 +584,7 @@ def _safe_context(args: argparse.Namespace) -> dict[str, object]:
         "run_date": args.run_date,
         "dry_run": getattr(args, "dry_run", not bool(getattr(args, "confirm_send", False))),
         "paid_apis_enabled": getattr(args, "enable_paid_apis", False),
+        "paid_news_apis_enabled": getattr(args, "enable_paid_news_apis", False),
         "email_send_enabled": getattr(args, "enable_email_send", False),
         "live_rss_enabled": bool(getattr(args, "enable_live_rss", False)),
         "live_article_fetch_enabled": bool(getattr(args, "enable_live_article_fetch", False)),
@@ -529,12 +595,28 @@ def _safe_context(args: argparse.Namespace) -> dict[str, object]:
         "output_dir": str(_run_output_dir(args.artifacts_dir, args.run_date)),
         "rss_fixtures_dir": getattr(args, "rss_fixtures_dir", ""),
         "max_total_live_articles": int(getattr(args, "live_rss_max_total_articles", DEFAULT_MAX_TOTAL_LIVE_ARTICLES)),
+        "target_backend_articles": int(getattr(args, "target_backend_articles", 250)),
+        "minimum_backend_articles": int(getattr(args, "minimum_backend_articles", 150)),
         "max_articles_per_ticker": int(getattr(args, "live_rss_max_articles_per_ticker", DEFAULT_MAX_ARTICLES_PER_TICKER)),
         "max_articles_per_source": int(getattr(args, "live_rss_max_articles_per_source", DEFAULT_MAX_ARTICLES_PER_SOURCE)),
         "max_email_stories": int(getattr(args, "max_email_stories", DEFAULT_MAX_EMAIL_STORIES)),
         "max_ranked_reads_per_ticker": int(
             getattr(args, "max_ranked_reads_per_ticker", DEFAULT_MAX_RANKED_READS_PER_TICKER)
         ),
+        "prefer_direct_sources": bool(getattr(args, "prefer_direct_sources", True)),
+        "max_google_news_share": float(
+            getattr(args, "max_google_news_share", DEFAULT_MAX_GOOGLE_NEWS_SHARE)
+        ),
+        "include_press_release_feeds": bool(
+            getattr(args, "include_press_release_feeds", True)
+        ),
+        "include_sec_feeds": bool(getattr(args, "include_sec_feeds", True)),
+        "paid_news_provider_flags": {
+            "marketaux": bool(getattr(args, "enable_marketaux", False)),
+            "finnhub_news": bool(getattr(args, "enable_finnhub_news", False)),
+            "alpha_vantage": bool(getattr(args, "enable_alpha_vantage_news", False)),
+            "gnews": bool(getattr(args, "enable_gnews", False)),
+        },
     }
 
 
@@ -680,6 +762,8 @@ def _collect_daily_articles(
     fake_providers: Mapping[str, FakeProvider] | None,
     store: SQLiteStore,
     run_id: str,
+    *,
+    environ: Mapping[str, str] | None = None,
 ) -> tuple[list[Article], dict[str, object]]:
     articles = (
         _collect_articles(args, fake_providers)
@@ -694,21 +778,97 @@ def _collect_daily_articles(
             "failure_count": 0,
             "article_count": 0,
             "source_counts": {},
+            "direct_source_article_count": 0,
+            "google_news_article_count": 0,
+            "direct_publisher_url_ratio": 0.0,
+            "google_news_share": 0.0,
+            "google_news_share_capped": True,
+            "articles_by_source_family": {},
+            "top_direct_source_publishers": {},
+            "top_google_news_publishers": {},
+            "source_family_counts": {},
+            "articles_by_source_id": {},
+            "google_news_backstop_count": 0,
+            "official_source_count": 0,
+            "company_ir_count": 0,
+            "press_release_wire_count": 0,
+            "direct_publisher_count": 0,
+            "paid_api_count": 0,
+            "paid_api_skipped_reasons": {},
+            "missing_company_ir_profiles": [],
+            "source_profiles_loaded": 0,
+            "source_profiles_enabled": 0,
+            "source_profiles_failed": [],
+            "source_diversity_score": 0.0,
+            "source_balance_score": 0.0,
             "attempts": [],
         }
 
     feed_urls = tuple(args.live_rss_url) if args.live_rss_url else None
-    live_articles, attempts = collect_live_rss_articles(
-        feed_urls=feed_urls,
-        timeout_seconds=max(0.1, float(args.live_rss_timeout_seconds)),
-        retries=max(0, int(args.live_rss_retries)),
-        user_agent=str(args.live_rss_user_agent),
-        max_articles_per_source=max(1, int(args.live_rss_max_articles_per_source)),
-        max_articles_per_ticker=max(1, int(args.live_rss_max_articles_per_ticker)),
-        max_total_articles=max(1, int(args.live_rss_max_total_articles)),
-    )
+    if feed_urls:
+        live_articles, rss_attempts = collect_live_rss_articles(
+            feed_urls=feed_urls,
+            timeout_seconds=max(0.1, float(args.live_rss_timeout_seconds)),
+            retries=max(0, int(args.live_rss_retries)),
+            user_agent=str(args.live_rss_user_agent),
+            max_articles_per_source=max(1, int(args.live_rss_max_articles_per_source)),
+            max_articles_per_ticker=max(1, int(args.live_rss_max_articles_per_ticker)),
+            max_total_articles=max(1, int(args.live_rss_max_total_articles)),
+            prefer_direct_sources=bool(args.prefer_direct_sources),
+            max_google_news_share=max(0.0, min(1.0, float(args.max_google_news_share))),
+            include_press_release_feeds=bool(args.include_press_release_feeds),
+        )
+        attempts = rss_attempts
+        scheduler_diagnostics = _direct_source_diagnostics(
+            live_articles,
+            max_google_news_share=max(0.0, min(1.0, float(args.max_google_news_share))),
+        )
+    else:
+        schedule = schedule_sources(
+            profiles=load_source_profiles(),
+            tracked_tickers=load_tracked_tickers(),
+            company_ir_profiles=COMPANY_IR_PROFILES,
+            run_date=args.run_date,
+            user_agent=str(args.live_rss_user_agent),
+            timeout_seconds=max(0.1, float(args.live_rss_timeout_seconds)),
+            retries=max(0, int(args.live_rss_retries)),
+            target_backend_articles=max(1, int(args.target_backend_articles)),
+            minimum_backend_articles=max(1, int(args.minimum_backend_articles)),
+            max_backend_articles=max(1, int(args.live_rss_max_total_articles)),
+            max_articles_per_source=max(1, int(args.live_rss_max_articles_per_source)),
+            max_articles_per_ticker=max(1, int(args.live_rss_max_articles_per_ticker)),
+            max_google_news_share=max(0.0, min(1.0, float(args.max_google_news_share))),
+            include_press_release_feeds=bool(args.include_press_release_feeds),
+            include_sec_feeds=bool(args.include_sec_feeds),
+            paid_api_global_enabled=bool(args.enable_paid_news_apis),
+            paid_provider_flags={
+                "marketaux": bool(args.enable_marketaux),
+                "finnhub_news": bool(args.enable_finnhub_news),
+                "alpha_vantage": bool(args.enable_alpha_vantage_news),
+                "gnews": bool(args.enable_gnews),
+            },
+            environ=environ or {},
+        )
+        live_articles = list(schedule.articles)
+        attempts = list(schedule.attempts)
+        scheduler_diagnostics = dict(schedule.diagnostics)
     recorder = ProviderUsageRecorder(store)
     for attempt in attempts:
+        attempt_metadata = (
+            {
+                "feed_id": attempt.feed_id,
+                "feed_url": attempt.feed_url,
+                "source_family": attempt.source_family,
+                "attempts": attempt.attempts,
+                "fetched_article_count": attempt.fetched_article_count,
+            }
+            if hasattr(attempt, "feed_id")
+            else {
+                **dict(getattr(attempt, "metadata", None) or {}),
+                "source_family": attempt.source_family,
+                "source_id": getattr(attempt, "source_id", attempt.provider),
+            }
+        )
         recorder.record(
             attempt.provider,
             "discover",
@@ -717,13 +877,7 @@ def _collect_daily_articles(
             article_count=attempt.article_count,
             latency_ms=attempt.latency_ms,
             error_class=attempt.error_class,
-            metadata={
-                "run_id": run_id,
-                "feed_id": attempt.feed_id,
-                "feed_url": attempt.feed_url,
-                "attempts": attempt.attempts,
-                "fetched_article_count": attempt.fetched_article_count,
-            },
+            metadata={"run_id": run_id, **attempt_metadata},
             run_id=run_id,
         )
 
@@ -737,13 +891,77 @@ def _collect_daily_articles(
         "failure_count": sum(1 for attempt in attempts if attempt.status != "success"),
         "article_count": len(live_articles),
         "source_counts": source_counts,
+        **scheduler_diagnostics,
         "caps": {
             "max_articles_per_source": max(1, int(args.live_rss_max_articles_per_source)),
             "max_articles_per_ticker": max(1, int(args.live_rss_max_articles_per_ticker)),
             "max_total_articles": max(1, int(args.live_rss_max_total_articles)),
+            "max_google_news_share": max(0.0, min(1.0, float(args.max_google_news_share))),
+            "target_backend_articles": max(1, int(args.target_backend_articles)),
+            "minimum_backend_articles": max(1, int(args.minimum_backend_articles)),
         },
         "attempts": [attempt.as_dict() for attempt in attempts],
     }
+
+
+def _direct_source_diagnostics(
+    articles: Sequence[Article],
+    *,
+    max_google_news_share: float,
+) -> dict[str, object]:
+    family_counts: dict[str, int] = {}
+    direct_publishers: dict[str, int] = {}
+    google_publishers: dict[str, int] = {}
+    direct_url_count = 0
+    google_count = 0
+    for article in articles:
+        family = str(article.metadata.get("source_family") or "unknown")
+        family_counts[family] = family_counts.get(family, 0) + 1
+        publisher = str(
+            article.metadata.get("source_name")
+            or article.metadata.get("provider")
+            or "unknown"
+        )
+        if family == GOOGLE_NEWS_DISCOVERY:
+            google_count += 1
+            google_publishers[publisher] = google_publishers.get(publisher, 0) + 1
+        else:
+            direct_publishers[publisher] = direct_publishers.get(publisher, 0) + 1
+        if classify_article_url(article.canonical_url) == URL_CLASS_DIRECT_PUBLISHER:
+            direct_url_count += 1
+    total = len(articles)
+    google_share = google_count / total if total else 0.0
+    return {
+        "direct_source_article_count": total - google_count,
+        "google_news_article_count": google_count,
+        "direct_publisher_url_ratio": round(direct_url_count / total, 4) if total else 0.0,
+        "google_news_share": round(google_share, 4),
+        "google_news_share_capped": google_share <= max_google_news_share + 0.0001,
+        "articles_by_source_family": dict(sorted(family_counts.items())),
+        "source_family_counts": dict(sorted(family_counts.items())),
+        "articles_by_source_id": {},
+        "google_news_backstop_count": google_count,
+        "official_source_count": 0,
+        "company_ir_count": 0,
+        "press_release_wire_count": int(family_counts.get("press_release_wire", 0)),
+        "direct_publisher_count": int(family_counts.get("direct_news_publisher", 0)),
+        "paid_api_count": 0,
+        "paid_api_skipped_reasons": {},
+        "missing_company_ir_profiles": [],
+        "source_profiles_loaded": 0,
+        "source_profiles_enabled": 0,
+        "source_profiles_failed": [],
+        "source_diversity_score": 0.0,
+        "source_balance_score": 0.0,
+        "top_direct_source_publishers": _top_counts(direct_publishers),
+        "top_google_news_publishers": _top_counts(google_publishers),
+    }
+
+
+def _top_counts(counts: Mapping[str, int], *, limit: int = 10) -> dict[str, int]:
+    return dict(
+        sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    )
 
 
 def _collect_fixture_rss_articles(fixtures_dir: Path) -> list[Article]:
@@ -801,7 +1019,7 @@ def _canonical_articles(articles: list[Article]) -> list[Article]:
 
 
 def _is_paid_provider(provider_name: str) -> bool:
-    return provider_name in {"alpha_vantage", "marketaux", "gnews"}
+    return provider_name in {"alpha_vantage", "marketaux", "gnews", "finnhub_news"}
 
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> str:
@@ -1463,9 +1681,9 @@ def _provider_validation_results(
 
 def _data_source_label(args: argparse.Namespace) -> str:
     if getattr(args, "enable_live_rss", False) and getattr(args, "include_fixtures", False):
-        return "free live RSS plus local RSS fixtures"
+        return "source-aware live acquisition plus local RSS fixtures"
     if getattr(args, "enable_live_rss", False):
-        return "free live RSS feeds"
+        return "source-aware official, issuer, wire, publisher, and RSS acquisition"
     return "local RSS fixtures"
 
 
@@ -1850,6 +2068,7 @@ def _write_markdown_report(report: DailyReportContract) -> str:
         "This briefing is not investment advice. Direction rows are not predictions.",
         "",
         *_markdown_daily_briefing(report),
+        *_markdown_source_coverage_line(report),
         "",
         *_markdown_ticker_summaries("Portfolio Summary", report.portfolio_summaries),
         "",
@@ -1984,6 +2203,21 @@ def _markdown_ticker_summaries(
     return lines
 
 
+def _markdown_source_coverage_line(report: DailyReportContract) -> list[str]:
+    diagnostics = report.source_coverage_diagnostics
+    paid = diagnostics.get("paid_api_count", 0)
+    paid_label = str(paid) if paid else "disabled"
+    return [
+        "**Source Coverage:** "
+        f"Official filings: {int(diagnostics.get('official_source_count', 0))} | "
+        f"Press releases: {int(diagnostics.get('press_release_wire_count', 0))} | "
+        f"Direct publishers: {int(diagnostics.get('direct_publisher_count', 0))} | "
+        f"Google backstop: {int(diagnostics.get('google_news_backstop_count', 0))} | "
+        f"Paid APIs: {paid_label}",
+        "",
+    ]
+
+
 def _markdown_stories_to_watch(report: DailyReportContract) -> list[str]:
     lines = ["## Stories to Watch", ""]
     written = False
@@ -2085,7 +2319,7 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
         f"| Run date | {report.report_date} |",
         f"| Data source | {_escape_markdown(report.data_source_label)} |",
         "| Delivery mode | local report only; no email sent |",
-        "| Paid API status | disabled |",
+        f"| Paid API status | {_escape_markdown(str(report.source_coverage_diagnostics.get('paid_api_status', 'disabled')))} |",
         f"| Warnings | {_escape_markdown(warnings)} |",
         f"| Report summary | {_escape_markdown(report.daily_summary)} |",
         "",
@@ -2099,6 +2333,19 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
         f"| {backend.backend_candidate_articles} | {backend.backend_visible_articles} | "
         f"{backend.backend_scored_articles} | {backend.backend_extracted_articles} | "
         f"{email.email_visible_stories} | {email.email_visible_ranked_reads} |",
+        "",
+        "### Source Acquisition Summary",
+        "",
+        "| Official | Company IR | Press Wires | Direct Publishers | Google Backstop | Google Share | Diversity | Balance |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        f"| {int(report.source_coverage_diagnostics.get('official_source_count', 0))} | "
+        f"{int(report.source_coverage_diagnostics.get('company_ir_count', 0))} | "
+        f"{int(report.source_coverage_diagnostics.get('press_release_wire_count', 0))} | "
+        f"{int(report.source_coverage_diagnostics.get('direct_publisher_count', 0))} | "
+        f"{int(report.source_coverage_diagnostics.get('google_news_backstop_count', 0))} | "
+        f"{float(report.source_coverage_diagnostics.get('google_news_share', 0.0)):.1%} | "
+        f"{float(report.source_coverage_diagnostics.get('source_diversity_score', 0.0)):.1f} | "
+        f"{float(report.source_coverage_diagnostics.get('source_balance_score', 0.0)):.1f} |",
         "",
         "### Source Quality Summary",
         "",

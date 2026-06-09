@@ -13,6 +13,7 @@ from news_pipeline.article_fetch import (
 )
 from news_pipeline.dedup import DedupeCluster, SourceLink, cluster_articles
 from news_pipeline.models import Article
+from news_pipeline.sources.rss_config import DIRECT_NEWS_PUBLISHER, GOOGLE_NEWS_DISCOVERY
 
 
 ARTICLE_PARAGRAPHS = (
@@ -157,6 +158,39 @@ class ArticleFetchTests(unittest.TestCase):
         self.assertEqual(summary.google_wrappers_unresolved, 1)
         self.assertIn("google_wrapper_unresolved", summary.records[0].failure_reasons)
 
+    def test_extraction_candidate_direct_ratio_and_family_success_are_reported(self):
+        direct = _article(
+            "https://publisher.example.com/nvidia-direct",
+            "NVIDIA direct publisher",
+            provider="direct_rss",
+            source="Direct Publisher",
+            source_family=DIRECT_NEWS_PUBLISHER,
+        )
+        google = _article(
+            "https://news.google.com/rss/articles/nvidia-wrapper",
+            "NVIDIA wrapper",
+            source_family=GOOGLE_NEWS_DISCOVERY,
+        )
+
+        def fake_urlopen(request, timeout):
+            if "news.google.com" in request.full_url:
+                return FakeHttpResponse(EMPTY_HTML, url=request.full_url)
+            return _html_response(request.full_url)
+
+        with patch("news_pipeline.article_fetch.urlopen", side_effect=fake_urlopen):
+            _enriched, summary = fetch_top_cluster_articles(
+                (_cluster(direct, (direct,)), _cluster(google, (google,))),
+                run_date="2026-06-04",
+            )
+
+        self.assertEqual(summary.direct_publisher_candidates, 1)
+        self.assertEqual(summary.google_wrapper_candidates, 1)
+        self.assertEqual(summary.extraction_candidate_direct_ratio, 0.5)
+        self.assertEqual(
+            summary.full_text_success_by_source_family,
+            {DIRECT_NEWS_PUBLISHER: 1},
+        )
+
     def test_failure_reasons_are_explicit_for_non_article_html_and_fallbacks(self):
         direct = _article("https://publisher.example.com/empty", "NVIDIA empty", snippet="NVIDIA snippet text.")
         with patch("news_pipeline.article_fetch.urlopen", return_value=FakeHttpResponse(EMPTY_HTML, url=direct.canonical_url)):
@@ -286,13 +320,25 @@ class ArticleFetchTests(unittest.TestCase):
         self.assertEqual(queue[0].skip_reason, "source_quality_excluded")
 
 
-def _article(url, title, *, snippet="NVIDIA stock news.", provider="google_news_rss_search", source="Google News"):
+def _article(
+    url,
+    title,
+    *,
+    snippet="NVIDIA stock news.",
+    provider="google_news_rss_search",
+    source="Google News",
+    source_family="",
+):
     return Article(
         canonical_url=url,
         title=title,
         snippet=snippet,
         published_at="2026-06-04T10:00:00+00:00",
-        metadata={"provider": provider, "source_name": source},
+        metadata={
+            "provider": provider,
+            "source_name": source,
+            "source_family": source_family,
+        },
     )
 
 

@@ -28,9 +28,11 @@ class ProviderValidationTests(unittest.TestCase):
                 "yahoo_finance_rss",
                 "cnbc_rss",
                 "marketwatch_rss",
+                "sec_edgar",
                 "alpha_vantage",
                 "marketaux",
                 "gnews",
+                "finnhub_news",
                 "resend",
             },
         )

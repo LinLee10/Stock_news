@@ -78,6 +78,7 @@ class ArticleExtractionRecord:
     extraction_quality_reasons: tuple[str, ...] = ()
     accepted_as_full_text: bool = False
     cache_hit: bool = False
+    source_family: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -119,6 +120,7 @@ class ArticleExtractionRecord:
             "extraction_quality_reasons": list(self.extraction_quality_reasons),
             "accepted_as_full_text": self.accepted_as_full_text,
             "cache_hit": self.cache_hit,
+            "source_family": self.source_family,
         }
 
 
@@ -228,6 +230,21 @@ class ArticleFetchSummary:
     @property
     def google_wrapper_candidates(self) -> int:
         return sum(1 for record in self.records if record.url_classification == URL_CLASS_GOOGLE_NEWS_WRAPPER)
+
+    @property
+    def extraction_candidate_direct_ratio(self) -> float:
+        total = self.direct_publisher_candidates + self.google_wrapper_candidates
+        return round(self.direct_publisher_candidates / total, 4) if total else 0.0
+
+    @property
+    def full_text_success_by_source_family(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in self.records:
+            if not record.accepted_as_full_text:
+                continue
+            family = record.source_family or "unknown"
+            counts[family] = counts.get(family, 0) + 1
+        return dict(sorted(counts.items()))
 
     @property
     def google_wrappers_unresolved(self) -> int:
@@ -345,6 +362,7 @@ class ArticleFetchSummary:
             "extraction_budget_unused_count": max(0, self.max_article_fetches - self.extraction_selected_count),
             "direct_publisher_candidates": self.direct_publisher_candidates,
             "google_wrapper_candidates": self.google_wrapper_candidates,
+            "extraction_candidate_direct_ratio": self.extraction_candidate_direct_ratio,
             "google_wrappers_unresolved": self.google_wrappers_unresolved,
             "full_text_accepted_count": self.successful_extractions,
             "usable_full_text_count": self.extraction_quality_grade_counts.get("usable_full_text", 0),
@@ -355,6 +373,7 @@ class ArticleFetchSummary:
             "extraction_quality_grade_counts": self.extraction_quality_grade_counts,
             "publisher_success_rates": self.extraction_success_rate_by_publisher,
             "publisher_profiles": list(self.publisher_profiles),
+            "full_text_success_by_source_family": self.full_text_success_by_source_family,
             "top_failure_reasons": self.failure_reason_counts,
             "top_unresolved_wrapper_publishers": self.top_unresolved_wrapper_publishers,
             "records": [record.as_dict() for record in self.records],
@@ -508,6 +527,8 @@ def build_extraction_queue(
                 f"direct_publisher={str(direct).lower()}",
                 f"cluster_primary={str(article.canonical_url == cluster.canonical_article.canonical_url).lower()}",
                 f"portfolio_relevance={str(bool(set(tickers) & portfolio_symbols)).lower()}",
+                f"source_acquisition={float(article.metadata.get('acquisition_score') or 0.0):.2f}",
+                f"profile_extraction_priority={float(article.metadata.get('extraction_priority') or 0.0):.2f}",
             )
             score = (
                 confidence * 40
@@ -519,13 +540,19 @@ def build_extraction_queue(
                     "background_context": 2,
                 }.get(recency.recency_bucket, 0)
                 + ARTICLE_TYPE_SERIOUSNESS.get(classification.primary_type, 0)
-                + (12 if direct else 0)
+                + (30 if direct else -20)
                 + (10 if article.canonical_url == cluster.canonical_article.canonical_url else 0)
                 + (6 if set(tickers) & portfolio_symbols else 3)
                 + min(8, cluster.publisher_diversity + cluster.source_diversity)
+                + float(article.metadata.get("acquisition_score") or 0.0) * 0.15
+                + float(article.metadata.get("extraction_priority") or 0.0) * 0.1
             )
             skip_reason = None
-            if not usable_matches:
+            if article.metadata.get("fetch_allowed") is False:
+                skip_reason = "fetch_disabled_by_source_profile"
+            elif article.metadata.get("extract_allowed") is False:
+                skip_reason = "extraction_disabled_by_source_profile"
+            elif not usable_matches:
                 skip_reason = "no_ticker_specific_match"
             elif not include_low_quality_sources and (
                 quality.tier >= 3
@@ -808,6 +835,7 @@ def _fetch_and_extract(
             extraction_quality_grade=result.extraction_quality_grade,
             extraction_quality_reasons=result.extraction_quality_reasons,
             accepted_as_full_text=result.accepted_as_full_text,
+            source_family=str(queue_item.article.metadata.get("source_family") or ""),
         )
         if result.accepted_as_full_text and result.extraction_basis == "full_text" and text:
             return _with_full_text(article, text, record), record
@@ -853,6 +881,7 @@ def _fetch_and_extract(
             status_code=exc.code if isinstance(exc, HTTPError) else status_code,
             extraction_quality_grade="blocked_or_shell" if isinstance(exc, HTTPError) and exc.code in {401, 403} else "title_only",
             extraction_quality_reasons=blocked_reasons or ("fetch_error",),
+            source_family=str(queue_item.article.metadata.get("source_family") or ""),
         )
 
 
@@ -1045,6 +1074,7 @@ def _cached_extraction(
         extraction_quality_reasons=quality_reasons,
         accepted_as_full_text=success,
         cache_hit=True,
+        source_family=str(queue_item.article.metadata.get("source_family") or ""),
     )
     if success:
         return _with_full_text(article, text, record), record
@@ -1198,6 +1228,7 @@ def _skipped_record(
         og_url=og_url,
         extraction_quality_grade=extraction_quality_grade,
         extraction_quality_reasons=extraction_quality_reasons,
+        source_family=str(queue_item.article.metadata.get("source_family") or "") if queue_item else "",
     )
 
 
@@ -1252,6 +1283,7 @@ def _fetched_failure_record(
         status_code=status_code,
         extraction_quality_grade=extraction_quality_grade,
         extraction_quality_reasons=extraction_quality_reasons,
+        source_family=str(queue_item.article.metadata.get("source_family") or "") if queue_item else "",
     )
 
 

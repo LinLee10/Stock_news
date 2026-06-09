@@ -41,6 +41,15 @@ class RssSourceTests(unittest.TestCase):
 
         self.assertEqual(clean_rss_snippet(snippet), "NVIDIA stock jumps Example Publisher")
 
+    def test_configured_source_name_is_used_before_generic_channel_title(self):
+        source = RssSource(
+            RSS_FIXTURE.replace("<source>Example Wire</source>", ""),
+            provider_name="cnbc_rss",
+            default_source_name="CNBC",
+        )
+
+        self.assertEqual(source.articles()[0].metadata["source_name"], "CNBC")
+
 
 if __name__ == "__main__":
     unittest.main()

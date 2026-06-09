@@ -285,7 +285,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run["articles_seen"], payload["article_count"])
             self.assertEqual(len(articles), payload["article_count"])
             self.assertEqual(len(sources), payload["article_count"])
-            self.assertEqual(len(provider_validation), 8)
+            self.assertEqual(len(provider_validation), 10)
             self.assertEqual(len(clusters), payload["cluster_count"])
             self.assertEqual(len(sentiments), payload["score_count"])
             self.assertTrue(any(row["ticker"] == "NVDA" for row in mentions))
@@ -303,7 +303,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(first["run_id"], second["run_id"])
             self.assertEqual(first_counts, second_counts)
             self.assertEqual(second_counts["runs"], 1)
-            self.assertEqual(second_counts["provider_validation"], 8)
+            self.assertEqual(second_counts["provider_validation"], 10)
             self.assertEqual(second_counts["provider_usage"], 0)
             self.assertEqual(second_counts["run_articles"], second["article_count"])
             self.assertEqual(second_counts["dedupe_clusters"], second["cluster_count"])
@@ -328,7 +328,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(first_counts, second_counts)
             self.assertEqual(second_counts["runs"], 1)
             self.assertEqual(second_counts["provider_usage"], 1)
-            self.assertEqual(second_counts["provider_validation"], 8)
+            self.assertEqual(second_counts["provider_validation"], 10)
             self.assertEqual(second_counts["run_articles"], second["article_count"])
 
     def test_dry_run_daily_writes_email_preview_without_email_network(self):
@@ -376,6 +376,9 @@ class CliTests(unittest.TestCase):
             payload = json.loads(stdout)
             output_dir = Path(payload["output_dir"])
             provider_validation = json.loads((output_dir / "provider_validation.json").read_text(encoding="utf-8"))
+            contract = json.loads(
+                (output_dir / "report_contract.json").read_text(encoding="utf-8")
+            )["report"]
 
             self.assertFalse(payload["live_rss_enabled"])
             self.assertFalse(provider_validation["live_rss"]["enabled"])
@@ -422,6 +425,9 @@ class CliTests(unittest.TestCase):
             output_dir = Path(payload["output_dir"])
             collected = json.loads((output_dir / "collected_articles.json").read_text(encoding="utf-8"))
             provider_validation = json.loads((output_dir / "provider_validation.json").read_text(encoding="utf-8"))
+            contract = json.loads(
+                (output_dir / "report_contract.json").read_text(encoding="utf-8")
+            )["report"]
             store = SQLiteStore(payload["database_path"])
             try:
                 usage_rows = store.list_provider_usage()
@@ -439,6 +445,23 @@ class CliTests(unittest.TestCase):
             self.assertEqual(provider_validation["live_rss"]["success_count"], 1)
             self.assertEqual(provider_validation["live_rss"]["article_count"], 1)
             self.assertEqual(provider_validation["live_rss"]["source_counts"]["google_news_rss_search"], 1)
+            self.assertEqual(provider_validation["live_rss"]["direct_source_article_count"], 1)
+            self.assertEqual(provider_validation["live_rss"]["google_news_article_count"], 0)
+            self.assertEqual(provider_validation["live_rss"]["direct_publisher_url_ratio"], 1.0)
+            self.assertIn(
+                "direct_news_publisher",
+                provider_validation["live_rss"]["articles_by_source_family"],
+            )
+            self.assertEqual(
+                contract["source_coverage_diagnostics"]["live_rss"]["direct_source_article_count"],
+                1,
+            )
+            self.assertIn("source_family_counts", contract["source_coverage_diagnostics"])
+            self.assertIn("google_news_backstop_count", contract["source_coverage_diagnostics"])
+            self.assertIn(
+                "full_text_success_by_source_family",
+                contract["extraction_coverage_diagnostics"],
+            )
             self.assertEqual(len(usage_rows), 1)
             self.assertEqual(usage_rows[0]["provider"], "google_news_rss_search")
             self.assertEqual(usage_rows[0]["operation"], "discover")

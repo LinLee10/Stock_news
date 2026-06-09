@@ -10,9 +10,14 @@ from news_pipeline.models import Article
 from news_pipeline.tickers import match_tickers
 
 from .rss_config import (
+    DEFAULT_MAX_GOOGLE_NEWS_SHARE,
     DEFAULT_MAX_ARTICLES_PER_SOURCE,
     DEFAULT_MAX_ARTICLES_PER_TICKER,
     DEFAULT_MAX_TOTAL_LIVE_ARTICLES,
+    DIRECT_NEWS_PUBLISHER,
+    GOOGLE_NEWS_DISCOVERY,
+    MARKET_DATA_OR_ANALYSIS,
+    PRESS_RELEASE_WIRE,
     RssFeedConfig,
     RssSourceFamilyConfig,
     enabled_source_families,
@@ -29,6 +34,7 @@ DEFAULT_LIVE_RSS_USER_AGENT = "StonkNewsPipeline/0.1 (+local dry-run live RSS te
 @dataclass(frozen=True)
 class LiveRssAttempt:
     provider: str
+    source_family: str
     feed_id: str
     feed_url: str
     status: str
@@ -42,6 +48,7 @@ class LiveRssAttempt:
     def as_dict(self) -> dict[str, object]:
         return {
             "provider": self.provider,
+            "source_family": self.source_family,
             "feed_id": self.feed_id,
             "feed_url": self.feed_url,
             "status": self.status,
@@ -57,6 +64,7 @@ class LiveRssAttempt:
 @dataclass(frozen=True)
 class _FetchedFeed:
     provider: str
+    source_family: str
     feed: RssFeedConfig
     articles: list[Article]
     attempt: LiveRssAttempt
@@ -81,32 +89,61 @@ def collect_live_rss_articles(
     max_articles_per_source: int = DEFAULT_MAX_ARTICLES_PER_SOURCE,
     max_articles_per_ticker: int = DEFAULT_MAX_ARTICLES_PER_TICKER,
     max_total_articles: int = DEFAULT_MAX_TOTAL_LIVE_ARTICLES,
+    prefer_direct_sources: bool = True,
+    max_google_news_share: float = DEFAULT_MAX_GOOGLE_NEWS_SHARE,
+    include_press_release_feeds: bool = True,
 ) -> tuple[list[Article], list[LiveRssAttempt]]:
     """Fetch RSS XML only and convert feed items to articles.
 
     Article HTML extraction is intentionally not performed here.
     """
     fetched_feeds: list[_FetchedFeed] = []
-    feed_specs = _feed_specs(feed_urls, source_families)
-    for provider, feed in feed_specs:
+    feed_specs = _feed_specs(
+        feed_urls,
+        source_families,
+        include_press_release_feeds=include_press_release_feeds,
+    )
+    if prefer_direct_sources:
+        feed_specs = tuple(
+            sorted(
+                feed_specs,
+                key=lambda item: (
+                    item[0].category == GOOGLE_NEWS_DISCOVERY,
+                    _source_family_rank(item[0].category),
+                ),
+            )
+        )
+    for family, feed in feed_specs:
         fetched_articles, fetch_attempt = _fetch_one_feed(
-            provider,
+            family.name,
+            family.category,
             feed,
             timeout_seconds=timeout_seconds,
             retries=retries,
             user_agent=user_agent,
         )
-        fetched_feeds.append(_FetchedFeed(provider, feed, fetched_articles, fetch_attempt))
+        fetched_feeds.append(
+            _FetchedFeed(
+                family.name,
+                family.category,
+                feed,
+                fetched_articles,
+                fetch_attempt,
+            )
+        )
 
     articles, accepted_counts = _cap_fetched_feeds(
         fetched_feeds,
         max_articles_per_source=max_articles_per_source,
         max_articles_per_ticker=max_articles_per_ticker,
         max_total_articles=max_total_articles,
+        prefer_direct_sources=prefer_direct_sources,
+        max_google_news_share=max_google_news_share,
     )
     attempts = [
         LiveRssAttempt(
             provider=fetched.attempt.provider,
+            source_family=fetched.attempt.source_family,
             feed_id=fetched.attempt.feed_id,
             feed_url=fetched.attempt.feed_url,
             status=fetched.attempt.status,
@@ -128,16 +165,36 @@ def _cap_fetched_feeds(
     max_articles_per_source: int,
     max_articles_per_ticker: int,
     max_total_articles: int,
+    prefer_direct_sources: bool,
+    max_google_news_share: float,
 ) -> tuple[list[Article], dict[tuple[str, str], int]]:
     accepted: list[Article] = []
     accepted_counts: dict[tuple[str, str], int] = {}
     ticker_counts: dict[str, int] = {}
     provider_counts: dict[str, int] = {}
 
+    if prefer_direct_sources:
+        fetched_feeds = sorted(
+            fetched_feeds,
+            key=lambda fetched: (
+                fetched.source_family == GOOGLE_NEWS_DISCOVERY,
+                _source_family_rank(fetched.source_family),
+            ),
+        )
     providers = tuple(dict.fromkeys(fetched.provider for fetched in fetched_feeds))
     for provider in providers:
         provider_feeds = [fetched for fetched in fetched_feeds if fetched.provider == provider]
-        if provider == "google_news_rss_search":
+        if provider_feeds[0].source_family == GOOGLE_NEWS_DISCOVERY:
+            direct_count = sum(
+                1
+                for article in accepted
+                if str(article.metadata.get("source_family") or "") != GOOGLE_NEWS_DISCOVERY
+            )
+            google_limit = _google_article_limit(
+                direct_count=direct_count,
+                max_total_articles=max_total_articles,
+                max_google_news_share=max_google_news_share,
+            )
             _accept_round_robin(
                 provider_feeds,
                 accepted,
@@ -146,7 +203,7 @@ def _cap_fetched_feeds(
                 ticker_counts,
                 max_articles_per_source=max_articles_per_source,
                 max_articles_per_ticker=max_articles_per_ticker,
-                max_total_articles=max_total_articles,
+                max_total_articles=min(max_total_articles, len(accepted) + google_limit),
             )
         else:
             _accept_sequential(
@@ -246,6 +303,8 @@ def _accept_article(
         return False
     if provider_counts.get(fetched.provider, 0) >= max_articles_per_source:
         return False
+    if any(existing.canonical_url == article.canonical_url for existing in accepted):
+        return False
     tickers = _matched_tickers(article)
     if not tickers:
         return False
@@ -270,6 +329,7 @@ def _matched_tickers(article: Article) -> tuple[str, ...]:
 
 def _fetch_one_feed(
     provider: str,
+    source_family: str,
     feed: RssFeedConfig,
     *,
     timeout_seconds: float,
@@ -284,10 +344,18 @@ def _fetch_one_feed(
             request = Request(feed.url, headers={"User-Agent": user_agent})
             with urlopen(request, timeout=timeout_seconds) as response:
                 feed_xml = response.read().decode("utf-8", errors="replace")
-            articles = RssSource(feed_xml, provider_name=provider).articles()
+            articles = [
+                _annotate_source_family(article, source_family, feed.feed_id)
+                for article in RssSource(
+                    feed_xml,
+                    provider_name=provider,
+                    default_source_name=feed.publisher_name,
+                ).articles()
+            ]
             latency_ms = int((monotonic() - started) * 1000)
             return articles, LiveRssAttempt(
                 provider=provider,
+                source_family=source_family,
                 feed_id=feed.feed_id,
                 feed_url=feed.url,
                 status="success",
@@ -302,6 +370,7 @@ def _fetch_one_feed(
     latency_ms = int((monotonic() - started) * 1000)
     return [], LiveRssAttempt(
         provider=provider,
+        source_family=source_family,
         feed_id=feed.feed_id,
         feed_url=feed.url,
         status="failure",
@@ -326,22 +395,82 @@ def _safe_error_message(error: Exception | None) -> str | None:
 def _feed_specs(
     feed_urls: tuple[str, ...] | None,
     source_families: tuple[RssSourceFamilyConfig, ...] | None,
-) -> tuple[tuple[str, RssFeedConfig], ...]:
+    *,
+    include_press_release_feeds: bool,
+) -> tuple[tuple[RssSourceFamilyConfig, RssFeedConfig], ...]:
     if feed_urls:
         return tuple(
             (
-                "google_news_rss_search",
+                RssSourceFamilyConfig(
+                    name="google_news_rss_search",
+                    display_name="Manual Live RSS",
+                    category=(
+                        GOOGLE_NEWS_DISCOVERY
+                        if "news.google.com" in url
+                        else DIRECT_NEWS_PUBLISHER
+                    ),
+                ),
                 RssFeedConfig(feed_id=f"manual_live_rss_{index}", url=url),
             )
             for index, url in enumerate(feed_urls, start=1)
         )
-    families = source_families or enabled_source_families()
+    families = source_families or enabled_source_families(
+        include_press_release_feeds=include_press_release_feeds,
+    )
     return tuple(
-        (family.name, feed)
+        (family, feed)
         for family in families
+        if include_press_release_feeds or family.category != PRESS_RELEASE_WIRE
         for feed in feed_urls_for_family(family)
     )
 
 
 def _article_text(article: Article) -> str:
     return " ".join(part for part in (article.title, article.snippet or "") if part)
+
+
+def _annotate_source_family(
+    article: Article,
+    source_family: str,
+    feed_id: str,
+) -> Article:
+    return Article(
+        canonical_url=article.canonical_url,
+        title=article.title,
+        article_id=article.article_id,
+        published_at=article.published_at,
+        full_text=article.full_text,
+        snippet=article.snippet,
+        metadata={
+            **article.metadata,
+            "source_family": source_family,
+            "source_feed_id": feed_id,
+            "direct_source": source_family != GOOGLE_NEWS_DISCOVERY,
+        },
+        created_at=article.created_at,
+    )
+
+
+def _source_family_rank(source_family: str) -> int:
+    return {
+        DIRECT_NEWS_PUBLISHER: 0,
+        MARKET_DATA_OR_ANALYSIS: 1,
+        PRESS_RELEASE_WIRE: 2,
+        GOOGLE_NEWS_DISCOVERY: 9,
+    }.get(source_family, 5)
+
+
+def _google_article_limit(
+    *,
+    direct_count: int,
+    max_total_articles: int,
+    max_google_news_share: float,
+) -> int:
+    share = max(0.0, min(1.0, float(max_google_news_share)))
+    if direct_count <= 0 or share >= 1.0:
+        return max_total_articles
+    if share <= 0:
+        return 0
+    ratio_limit = int(direct_count * share / (1.0 - share))
+    capacity_limit = int(max_total_articles * share)
+    return max(0, min(ratio_limit, capacity_limit, max_total_articles - direct_count))

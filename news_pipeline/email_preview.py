@@ -72,6 +72,7 @@ def _render_email_preview(
         f"    <h1>{escape(subject)}</h1>",
         "    <p class=\"muted\">This briefing is not investment advice. Direction rows are not predictions.</p>",
         _top_briefing(report),
+        _source_coverage_line(report),
         _ticker_summaries("Portfolio Summary", report.portfolio_summaries),
         _ticker_summaries("Watchlist Summary", report.watchlist_summaries),
         _event_clusters(report),
@@ -88,6 +89,7 @@ def _render_email_preview(
         "    <h2>Source and Extraction Diagnostics</h2>",
         _report_metadata(report),
         _backend_pool_summary(report),
+        _source_acquisition_summary(report),
         _source_quality_summary(report),
         _extraction_summary(report),
         _attachment_manifest(attachments),
@@ -106,7 +108,7 @@ def _report_metadata(report: DailyReportContract) -> str:
         f"      <tr><td>Data source</td><td>{escape(report.data_source_label)}</td></tr>",
         "      <tr><td>Delivery mode</td><td><strong>Preview only:</strong> no live email provider was contacted.</td></tr>",
         "      <tr><td>SMTP send status</td><td>not sent</td></tr>",
-        "      <tr><td>Paid API status</td><td>disabled</td></tr>",
+        f"      <tr><td>Paid API status</td><td>{escape(str(report.source_coverage_diagnostics.get('paid_api_status', 'disabled')))}</td></tr>",
         f"      <tr><td>Report summary</td><td>{escape(report.daily_summary)}</td></tr>",
     ]
     if report.report_warnings:
@@ -140,6 +142,20 @@ def _top_briefing(report: DailyReportContract) -> str:
             "      </ul>",
             "    </section>",
         ]
+    )
+
+
+def _source_coverage_line(report: DailyReportContract) -> str:
+    diagnostics = report.source_coverage_diagnostics
+    paid = diagnostics.get("paid_api_count", 0)
+    paid_label = str(paid) if paid else "disabled"
+    return (
+        "    <p class=\"muted\"><strong>Source Coverage:</strong> "
+        f"Official filings: {int(diagnostics.get('official_source_count', 0))} &middot; "
+        f"Press releases: {int(diagnostics.get('press_release_wire_count', 0))} &middot; "
+        f"Direct publishers: {int(diagnostics.get('direct_publisher_count', 0))} &middot; "
+        f"Google backstop: {int(diagnostics.get('google_news_backstop_count', 0))} &middot; "
+        f"Paid APIs: {escape(paid_label)}</p>"
     )
 
 
@@ -218,6 +234,26 @@ def _backend_pool_summary(report: DailyReportContract) -> str:
             f"<td class=\"num\">{backend.backend_extracted_articles}</td>"
             f"<td class=\"num\">{email.email_visible_stories}</td>"
             f"<td class=\"num\">{email.email_visible_ranked_reads}</td>"
+            "</tr>",
+            "    </table>",
+        ]
+    )
+
+
+def _source_acquisition_summary(report: DailyReportContract) -> str:
+    diagnostics = report.source_coverage_diagnostics
+    return "\n".join(
+        [
+            "    <h2>Source Acquisition Summary</h2>",
+            "    <table>",
+            "      <tr><th>Official</th><th>Company IR</th><th>Press Wires</th><th>Direct Publishers</th><th>Google Backstop</th><th>Google Share</th></tr>",
+            "      <tr>"
+            f"<td class=\"num\">{int(diagnostics.get('official_source_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('company_ir_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('press_release_wire_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('direct_publisher_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('google_news_backstop_count', 0))}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('google_news_share', 0.0)):.1%}</td>"
             "</tr>",
             "    </table>",
         ]

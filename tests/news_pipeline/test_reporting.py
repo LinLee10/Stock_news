@@ -37,6 +37,17 @@ class ReportingTests(unittest.TestCase):
             self.assertTrue(Path(report.html_preview_report).exists())
             self.assertTrue(Path(report.html_preview_report).is_relative_to(output_dir))
             self.assertIn("Daily report for 2026-06-03", report.daily_summary)
+            supplemental_names = {Path(path).name for path in report.supplemental_csv_artifacts}
+            self.assertTrue(
+                {
+                    "source_profiles.csv",
+                    "source_family_counts.csv",
+                    "source_acquisition_diagnostics.csv",
+                    "source_diversity_diagnostics.csv",
+                    "paid_api_skipped_reasons.csv",
+                    "missing_company_ir_profiles.csv",
+                }.issubset(supplemental_names)
+            )
 
     def test_report_tables_and_links_are_in_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -81,6 +92,7 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("Read More By Ticker", html)
             self.assertIn("This briefing is not investment advice", html)
             self.assertIn("deterministic placeholder logic", html)
+            self.assertIn("Source Coverage:", html)
             self.assertIn("+5 more links in JSON artifacts", html)
             self.assertIn("Event 4", html)
             self.assertNotIn("Event 5", html)
@@ -153,6 +165,33 @@ def _fake_report_input() -> DailyReportInput:
             "AAPL": (
                 EventClusterRow("AAPL", "Apple earnings coverage", "https://example.com/aapl", 1, 1, 1),
             )
+        },
+        source_coverage_diagnostics={
+            "official_source_count": 1,
+            "company_ir_count": 0,
+            "press_release_wire_count": 2,
+            "direct_publisher_count": 4,
+            "google_news_backstop_count": 3,
+            "google_news_share": 0.3,
+            "paid_api_count": 0,
+            "paid_api_status": "disabled_or_skipped",
+            "source_diversity_score": 80.0,
+            "source_balance_score": 70.0,
+            "source_family_counts": {
+                "regulatory_official": 1,
+                "press_release_wire": 2,
+                "direct_news_publisher": 4,
+                "google_news_backstop": 3,
+            },
+            "source_profiles": (
+                {
+                    "source_id": "example",
+                    "source_family": "direct_news_publisher",
+                    "publisher_name": "Example",
+                },
+            ),
+            "paid_api_skipped_reasons": {"marketaux": "global_paid_api_flag_disabled"},
+            "missing_company_ir_profiles": ("AAPL",),
         },
     )
 

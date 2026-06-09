@@ -2,6 +2,7 @@ import unittest
 
 from news_pipeline.sources.alpha_vantage import AlphaVantageSource
 from news_pipeline.sources.gnews import GNewsSource
+from news_pipeline.sources.finnhub import FinnhubNewsSource
 from news_pipeline.sources.marketaux import MarketauxSource
 
 
@@ -84,6 +85,30 @@ class ApiAdapterTests(unittest.TestCase):
         self.assertEqual(article.full_text, "Full article content from mocked GNews response.")
         self.assertEqual(article.snippet, "Short summary.")
         self.assertEqual(article.metadata["source_name"], "GNews Source")
+
+    def test_finnhub_company_news_is_normalized_from_mocked_payload(self):
+        source = FinnhubNewsSource(
+            {
+                "NVDA": [
+                    {
+                        "id": 7,
+                        "headline": "NVIDIA launches a new AI platform",
+                        "url": "https://example.com/nvda-platform",
+                        "summary": "The company announced a product update.",
+                        "source": "Example",
+                        "datetime": 1781000000,
+                        "category": "company",
+                        "related": "NVDA",
+                    }
+                ]
+            }
+        )
+
+        article = source.articles(("NVDA",))[0]
+
+        self.assertEqual(article.metadata["provider"], "finnhub_news")
+        self.assertEqual(article.metadata["symbols"], ["NVDA"])
+        self.assertEqual(article.metadata["provider_article_id"], "7")
 
 
 if __name__ == "__main__":

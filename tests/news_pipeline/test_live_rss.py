@@ -3,7 +3,13 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from news_pipeline.sources.live_rss import collect_live_rss_articles
-from news_pipeline.sources.rss_config import RSS_SOURCE_FAMILIES
+from news_pipeline.sources.rss_config import (
+    DIRECT_NEWS_PUBLISHER,
+    GOOGLE_NEWS_DISCOVERY,
+    RssFeedConfig,
+    RssSourceFamilyConfig,
+    RSS_SOURCE_FAMILIES,
+)
 
 
 def _rss(title, link, source, description="NVDA stock news"):
@@ -113,6 +119,28 @@ class LiveRssTests(unittest.TestCase):
         self.assertEqual({attempt.status for attempt in attempts}, {"success"})
         self.assertEqual(len(articles), 3)
         self.assertEqual({article.metadata["provider"] for article in articles}, {"yahoo_finance_rss", "cnbc_rss", "marketwatch_rss"})
+        self.assertEqual(
+            {article.metadata["source_family"] for article in articles},
+            {"market_data_or_analysis", DIRECT_NEWS_PUBLISHER},
+        )
+
+    def test_source_family_categories_and_optional_press_release_feeds_are_configured(self):
+        categories = {family.category for family in RSS_SOURCE_FAMILIES}
+        names = {family.name for family in RSS_SOURCE_FAMILIES}
+
+        self.assertTrue(
+            {
+                "google_news_backstop",
+                "direct_news_publisher",
+                "press_release_wire",
+                "regulatory_official",
+                "company_ir",
+                "market_data_or_analysis",
+            }.issubset(categories)
+        )
+        self.assertIn("pr_newswire_rss", names)
+        self.assertIn("globenewswire_rss", names)
+        self.assertIn("business_wire_rss", names)
 
     def test_one_direct_feed_failure_does_not_drop_successful_feed(self):
         direct_families = tuple(
@@ -133,8 +161,9 @@ class LiveRssTests(unittest.TestCase):
             )
 
         self.assertEqual(len(articles), 1)
-        self.assertEqual([attempt.status for attempt in attempts], ["failure", "success"])
-        self.assertEqual(attempts[0].error_class, "TimeoutError")
+        self.assertEqual(sum(attempt.status == "success" for attempt in attempts), 3)
+        failure = next(attempt for attempt in attempts if attempt.status == "failure")
+        self.assertEqual(failure.error_class, "TimeoutError")
 
     def test_caps_keep_live_rss_collection_readable(self):
         google_family = tuple(
@@ -197,6 +226,56 @@ class LiveRssTests(unittest.TestCase):
         self.assertEqual(articles[0].title, "NVIDIA stock rises after analyst upgrade")
         self.assertEqual(attempts[0].fetched_article_count, 2)
         self.assertEqual(attempts[0].article_count, 1)
+
+    def test_direct_sources_are_collected_first_and_google_share_is_capped(self):
+        direct_family = RssSourceFamilyConfig(
+            name="direct_test",
+            display_name="Direct Test",
+            category=DIRECT_NEWS_PUBLISHER,
+            feeds=(RssFeedConfig("direct_test_feed", "https://publisher.example.com/rss"),),
+        )
+        google_family = RssSourceFamilyConfig(
+            name="google_news_rss_search",
+            display_name="Google Test",
+            category=GOOGLE_NEWS_DISCOVERY,
+            feeds=(
+                RssFeedConfig("google_nvda", "https://news.google.com/rss/search?q=NVDA"),
+                RssFeedConfig("google_avgo", "https://news.google.com/rss/search?q=AVGO"),
+            ),
+        )
+
+        def fake_urlopen(request, timeout):
+            if "publisher.example.com" in request.full_url:
+                return FakeHttpResponse(
+                    _rss(
+                        "NVIDIA direct publisher update",
+                        "https://publisher.example.com/nvda-direct",
+                        "Direct Publisher",
+                    )
+                )
+            symbol = "NVDA" if "NVDA" in request.full_url else "AVGO"
+            return FakeHttpResponse(
+                _rss(
+                    f"{symbol} Google discovery update",
+                    f"https://news.google.com/rss/articles/{symbol.lower()}",
+                    "Google News",
+                    f"{symbol} stock news.",
+                )
+            )
+
+        with patch("news_pipeline.sources.live_rss.urlopen", side_effect=fake_urlopen):
+            articles, attempts = collect_live_rss_articles(
+                source_families=(google_family, direct_family),
+                retries=0,
+                max_total_articles=10,
+                max_google_news_share=0.5,
+                prefer_direct_sources=True,
+            )
+
+        self.assertEqual(articles[0].metadata["source_family"], DIRECT_NEWS_PUBLISHER)
+        self.assertEqual(sum(article.metadata["source_family"] == GOOGLE_NEWS_DISCOVERY for article in articles), 1)
+        self.assertEqual(len(articles), 2)
+        self.assertEqual(attempts[0].provider, "direct_test")
 
 
 if __name__ == "__main__":

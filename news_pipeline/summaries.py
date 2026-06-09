@@ -88,6 +88,7 @@ class ArticleMicroSummary:
     primary_ticker: str | None
     ticker_match_confidence: Mapping[str, float]
     ticker_match_reasons: Mapping[str, str]
+    acquisition_score: float
     ranking_score: float
 
 
@@ -200,6 +201,7 @@ def summarize_article(article: Article, *, ticker: TrackedTicker | None = None) 
         primary_ticker=next((match.ticker for match in ticker_matches if match.primary), None),
         ticker_match_confidence={match.ticker: match.confidence for match in ticker_matches},
         ticker_match_reasons={match.ticker: match.reason for match in ticker_matches},
+        acquisition_score=float(article.metadata.get("acquisition_score") or 0.0),
         ranking_score=0.0,
     )
 
@@ -383,6 +385,7 @@ def _ranking_score(
         and source_count <= 1
         else 0
     )
+    acquisition_points = min(12.0, max(0.0, summary.acquisition_score) * 0.12)
     return round(
         quality_points
         + recency_points
@@ -392,7 +395,8 @@ def _ranking_score(
         + diversity_points
         + event_points
         + sentiment_points
-        + analyst_penalty,
+        + analyst_penalty
+        + acquisition_points,
         2,
     )
 

@@ -50,6 +50,13 @@ PROVIDER_REGISTRY: dict[str, ProviderConfig] = {
         reset_window="none",
         quota_truth_source="no_provider_quota",
     ),
+    "sec_edgar": ProviderConfig(
+        name="sec_edgar",
+        provider_type="official_api",
+        limit_type="published_rate_limit",
+        reset_window="none",
+        quota_truth_source="sec_fair_access_policy",
+    ),
     "alpha_vantage": ProviderConfig(
         name="alpha_vantage",
         provider_type="api",
@@ -73,6 +80,14 @@ PROVIDER_REGISTRY: dict[str, ProviderConfig] = {
         reset_window="daily",
         quota_truth_source="provider_response_or_plan",
         key_env_var="GNEWS_API_KEY",
+    ),
+    "finnhub_news": ProviderConfig(
+        name="finnhub_news",
+        provider_type="api",
+        limit_type="plan_quota",
+        reset_window="provider_plan",
+        quota_truth_source="provider_response_or_plan",
+        key_env_var="FINNHUB_API_KEY",
     ),
     "resend": ProviderConfig(
         name="resend",

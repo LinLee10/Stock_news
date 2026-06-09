@@ -76,6 +76,9 @@ TIER_2_NAMES = {
     "tradingview",
     "yahoo finance",
     "zacks",
+    "pr newswire",
+    "globenewswire",
+    "business wire",
 }
 TIER_2_DOMAINS = {
     "barchart.com",
@@ -92,7 +95,12 @@ TIER_2_DOMAINS = {
     "tipranks.com",
     "tradingview.com",
     "zacks.com",
+    "prnewswire.com",
+    "globenewswire.com",
+    "businesswire.com",
 }
+PRESS_RELEASE_WIRE_NAMES = {"pr newswire", "globenewswire", "business wire"}
+PRESS_RELEASE_WIRE_DOMAINS = {"prnewswire.com", "globenewswire.com", "businesswire.com"}
 
 TIER_3_NAMES = {
     "chartmill",
@@ -240,6 +248,8 @@ def assess_article_source(article: Article) -> SourceQuality:
         return _quality(TIER_1_HIGH_TRUST, "company_investor_relations", publisher, domain)
     if _matches_any(publisher, TIER_1_NAMES) or domain in TIER_1_DOMAINS:
         return _quality(TIER_1_HIGH_TRUST, "trusted_publisher", publisher, domain)
+    if _matches_any(publisher, PRESS_RELEASE_WIRE_NAMES) or domain in PRESS_RELEASE_WIRE_DOMAINS:
+        return _quality(TIER_2_USABLE, "press_release_wire", publisher, domain)
     if _matches_any(publisher, TIER_2_NAMES) or domain in TIER_2_DOMAINS:
         return _quality(TIER_2_USABLE, "usable_financial_source", publisher, domain)
     if _matches_any(publisher, TIER_3_NAMES) or domain in TIER_3_DOMAINS:

@@ -129,6 +129,7 @@ def _weighted_input(
         "extraction_basis": {"full_text": 1.25, "snippet": 0.75, "title": 0.4}[basis],
         "dedupe_uniqueness": 1.0 if primary else 0.35,
         "tracked_relevance": 1.1 if ticker.group == "portfolio" else 1.0,
+        "source_family": _source_family_factor(article),
     }
     weight = 1.0
     reasons = []
@@ -163,6 +164,17 @@ def _article_type_factor(article_type: str) -> float:
         return 0.65
     seriousness = ARTICLE_TYPE_SERIOUSNESS.get(article_type, 0)
     return min(1.25, 0.85 + max(0, seriousness) / 35.0)
+
+
+def _source_family_factor(article: Article) -> float:
+    family = str(article.metadata.get("source_family") or "")
+    if family == "press_release_wire" or article.metadata.get("issuer_promotional"):
+        return 0.65
+    if family == "google_news_backstop":
+        return 0.75
+    if family in {"regulatory_official", "company_ir"}:
+        return 1.15
+    return 1.0
 
 
 def _coverage_row(

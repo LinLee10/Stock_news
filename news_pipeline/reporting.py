@@ -334,6 +334,56 @@ def build_daily_report(
             "value",
             report_input.extraction_coverage_diagnostics,
         ),
+        _write_dict_rows_csv(
+            output_dir / "source_profiles.csv",
+            tuple(report_input.source_coverage_diagnostics.get("source_profiles", ())),
+        ),
+        _write_mapping_csv(
+            output_dir / "source_family_counts.csv",
+            "source_family",
+            "article_count",
+            report_input.source_coverage_diagnostics.get("source_family_counts", {}),
+        ),
+        _write_mapping_csv(
+            output_dir / "source_acquisition_diagnostics.csv",
+            "diagnostic",
+            "value",
+            report_input.source_coverage_diagnostics,
+        ),
+        _write_mapping_csv(
+            output_dir / "source_diversity_diagnostics.csv",
+            "diagnostic",
+            "value",
+            {
+                "source_diversity_score": report_input.source_coverage_diagnostics.get(
+                    "source_diversity_score",
+                    0.0,
+                ),
+                "source_balance_score": report_input.source_coverage_diagnostics.get(
+                    "source_balance_score",
+                    0.0,
+                ),
+                "direct_vs_aggregator_ratio": report_input.source_coverage_diagnostics.get(
+                    "direct_vs_aggregator_ratio",
+                    0.0,
+                ),
+                "google_news_share": report_input.source_coverage_diagnostics.get(
+                    "google_news_share",
+                    0.0,
+                ),
+            },
+        ),
+        _write_mapping_csv(
+            output_dir / "paid_api_skipped_reasons.csv",
+            "provider",
+            "reason",
+            report_input.source_coverage_diagnostics.get("paid_api_skipped_reasons", {}),
+        ),
+        _write_value_rows_csv(
+            output_dir / "missing_company_ir_profiles.csv",
+            "ticker",
+            report_input.source_coverage_diagnostics.get("missing_company_ir_profiles", ()),
+        ),
     )
     chart_attachments = (
         write_placeholder_chart(
@@ -419,6 +469,35 @@ def _write_mapping_csv(
         writer.writeheader()
         for key, value in sorted(values.items()):
             writer.writerow({key_name: key, value_name: value})
+    return str(path)
+
+
+def _write_dict_rows_csv(
+    path: Path,
+    rows: Iterable[Mapping[str, object]],
+) -> str:
+    rows = tuple(rows)
+    fieldnames = tuple(dict.fromkeys(key for row in rows for key in row))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames or ("source_id",))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key) for key in fieldnames})
+    return str(path)
+
+
+def _write_value_rows_csv(
+    path: Path,
+    fieldname: str,
+    values: Iterable[object],
+) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=(fieldname,))
+        writer.writeheader()
+        for value in values:
+            writer.writerow({fieldname: value})
     return str(path)
 
 
@@ -543,6 +622,7 @@ def _write_html_preview(
         f"  <h1>Portfolio and Watchlist Market Briefing - {escape(report_input.report_date)}</h1>",
         "  <p class=\"muted\">This briefing is not investment advice. Direction rows are not predictions.</p>",
         _top_briefing_html(report_input, top_10),
+        _source_coverage_line_html(report_input.source_coverage_diagnostics),
         _ticker_summaries_html("Portfolio Summary", report_input.portfolio_summaries),
         _ticker_summaries_html("Watchlist Summary", report_input.watchlist_summaries),
         _event_clusters_html(report_input.event_clusters_by_ticker),
@@ -559,6 +639,7 @@ def _write_html_preview(
         "  <h2>Source and Extraction Diagnostics</h2>",
         _report_metadata_html(report_input, top_10),
         _backend_pool_diagnostics_html(report_input),
+        _source_acquisition_diagnostics_html(report_input.source_coverage_diagnostics),
         _source_quality_summary_html(report_input.extraction_summary.source_quality_summary),
         _extraction_summary_html(report_input.extraction_summary),
         "</body>",
@@ -587,7 +668,7 @@ def _report_metadata_html(
         f"    <tr><td>Current local date</td><td>{escape(date.today().isoformat())}</td></tr>",
         f"    <tr><td>Data source</td><td>{escape(report_input.data_source_label)}</td></tr>",
         "    <tr><td>Delivery mode</td><td>local report only; no email sent</td></tr>",
-        "    <tr><td>Paid API status</td><td>disabled</td></tr>",
+        f"    <tr><td>Paid API status</td><td>{escape(str(report_input.source_coverage_diagnostics.get('paid_api_status', 'disabled')))}</td></tr>",
         f"    <tr><td>Report summary</td><td>{escape(_plain_english_summary(report_input, top_10))}</td></tr>",
     ]
     if warnings:
@@ -712,6 +793,42 @@ def _top_briefing_html(
             *[f"      <li>{escape(bullet)}</li>" for bullet in bullets if bullet][:5],
             "    </ul>",
             "  </section>",
+        ]
+    )
+
+
+def _source_coverage_line_html(diagnostics: Mapping[str, object]) -> str:
+    paid = diagnostics.get("paid_api_count", 0)
+    paid_label = str(paid) if paid else "disabled"
+    return (
+        "  <p class=\"muted\"><strong>Source Coverage:</strong> "
+        f"Official filings: {int(diagnostics.get('official_source_count', 0))} &middot; "
+        f"Press releases: {int(diagnostics.get('press_release_wire_count', 0))} &middot; "
+        f"Direct publishers: {int(diagnostics.get('direct_publisher_count', 0))} &middot; "
+        f"Google backstop: {int(diagnostics.get('google_news_backstop_count', 0))} &middot; "
+        f"Paid APIs: {escape(paid_label)}</p>"
+    )
+
+
+def _source_acquisition_diagnostics_html(
+    diagnostics: Mapping[str, object],
+) -> str:
+    return "\n".join(
+        [
+            "  <h2>Source Acquisition Summary</h2>",
+            "  <table>",
+            "    <tr><th>Official</th><th>Company IR</th><th>Press Wires</th><th>Direct Publishers</th><th>Google Backstop</th><th>Google Share</th><th>Diversity</th><th>Balance</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{int(diagnostics.get('official_source_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('company_ir_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('press_release_wire_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('direct_publisher_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('google_news_backstop_count', 0))}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('google_news_share', 0.0)):.1%}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('source_diversity_score', 0.0)):.1f}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('source_balance_score', 0.0)):.1f}</td>"
+            "</tr>",
+            "  </table>",
         ]
     )
 
