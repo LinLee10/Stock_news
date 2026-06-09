@@ -358,6 +358,13 @@ def main(
         )
         _write_json(output_dir / "article_extractions.json", {**context, "article_fetch": article_fetch_summary.as_dict()})
         _write_json(
+            output_dir / "publisher_extraction_profiles.json",
+            {
+                **context,
+                "publisher_profiles": list(article_fetch_summary.publisher_profiles),
+            },
+        )
+        _write_json(
             output_dir / "dedupe_clusters.json",
             {
                 **context,
@@ -410,6 +417,18 @@ def main(
             "extraction_selected_count": article_fetch_summary.extraction_selected_count,
             "extraction_skipped_count": article_fetch_summary.extraction_skipped_count,
             "extraction_success_rate": article_fetch_summary.extraction_success_rate,
+            "extraction_budget_unused_count": max(
+                0,
+                article_fetch_summary.max_article_fetches - article_fetch_summary.extraction_selected_count,
+            ),
+            "direct_publisher_candidates": article_fetch_summary.direct_publisher_candidates,
+            "google_wrapper_candidates": article_fetch_summary.google_wrapper_candidates,
+            "google_wrappers_unresolved": article_fetch_summary.google_wrappers_unresolved,
+            "full_text_accepted_count": article_fetch_summary.successful_extractions,
+            "weak_text_count": article_fetch_summary.extraction_quality_grade_counts.get("weak_text", 0),
+            "extraction_quality_grade_counts": article_fetch_summary.extraction_quality_grade_counts,
+            "extractor_method_success_counts": article_fetch_summary.extraction_method_success_counts,
+            "publisher_success_rates": article_fetch_summary.extraction_success_rate_by_publisher,
             "output_dir": report.output_dir,
             "html_preview_report": report.html_preview_report,
             "email_preview_html": email_preview.html_preview_path,
@@ -769,6 +788,7 @@ def _run_article_fetch_stage(args: argparse.Namespace, clusters: Sequence[object
         fetch_timeout_seconds=args.fetch_timeout_seconds,
         include_low_quality_sources=args.include_low_quality_sources,
         min_source_quality_tier=args.min_source_quality_tier,
+        cache_path=_run_output_dir(args.artifacts_dir, args.run_date) / "extraction_cache.json",
     )
 
 
@@ -1076,7 +1096,18 @@ def _daily_report_input_from_store(
         data_source_label=data_source_label,
         backend_article_pool_summary=backend_article_pool_summary or BackendArticlePoolSummary(),
         source_coverage_diagnostics=source_coverage_diagnostics or {},
-        extraction_coverage_diagnostics=(article_fetch_summary.as_dict() if article_fetch_summary else {}),
+        extraction_coverage_diagnostics=(
+            {
+                **article_fetch_summary.as_dict(),
+                "full_text_basis_count": int(sentiment_basis_counts.get("full_text", 0)),
+                "snippet_basis_count": int(sentiment_basis_counts.get("snippet", 0)),
+                "title_basis_count": int(sentiment_basis_counts.get("title", 0)),
+                "snippet_fallback_count": int(sentiment_basis_counts.get("snippet", 0)),
+                "title_fallback_count": int(sentiment_basis_counts.get("title", 0)),
+            }
+            if article_fetch_summary
+            else {}
+        ),
         dedupe_diagnostics=dedupe_diagnostics or {},
         ticker_match_confidence_summary=ticker_match_confidence_summary or {},
         article_type_counts=article_type_count_summary or {},
@@ -1294,6 +1325,25 @@ def _extraction_summary_from_fetch_summary(
             extraction_success_rate=article_fetch_summary.extraction_success_rate,
             extraction_success_rate_by_publisher=article_fetch_summary.extraction_success_rate_by_publisher,
             extraction_success_rate_by_source_provider=article_fetch_summary.extraction_success_rate_by_source_provider,
+            extraction_attempted_count=article_fetch_summary.attempted_fetches,
+            extraction_budget_unused_count=max(
+                0,
+                article_fetch_summary.max_article_fetches - article_fetch_summary.extraction_selected_count,
+            ),
+            direct_publisher_candidates=article_fetch_summary.direct_publisher_candidates,
+            google_wrapper_candidates=article_fetch_summary.google_wrapper_candidates,
+            google_wrappers_unresolved=article_fetch_summary.google_wrappers_unresolved,
+            full_text_accepted_count=article_fetch_summary.successful_extractions,
+            usable_full_text_count=article_fetch_summary.extraction_quality_grade_counts.get("usable_full_text", 0),
+            weak_text_count=article_fetch_summary.extraction_quality_grade_counts.get("weak_text", 0),
+            snippet_fallback_count=int(sentiment_basis_counts.get("snippet", 0)),
+            title_fallback_count=int(sentiment_basis_counts.get("title", 0)),
+            blocked_or_shell_count=article_fetch_summary.extraction_quality_grade_counts.get("blocked_or_shell", 0),
+            extraction_quality_grade_counts=article_fetch_summary.extraction_quality_grade_counts,
+            extractor_method_success_counts=article_fetch_summary.extraction_method_success_counts,
+            publisher_success_rates=article_fetch_summary.extraction_success_rate_by_publisher,
+            publisher_profiles=article_fetch_summary.publisher_profiles,
+            top_unresolved_wrapper_publishers=article_fetch_summary.top_unresolved_wrapper_publishers,
         )
     fetched_count = sum(1 for row in extractions_by_article.values() if int(row.get("fetched") or 0))
     success_count = sum(1 for row in extractions_by_article.values() if str(row.get("extraction_basis")) == "full_text")

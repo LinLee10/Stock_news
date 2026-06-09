@@ -58,11 +58,19 @@ MULTI_LIVE_RSS_FIXTURE = """<?xml version="1.0"?>
 </rss>
 """
 
-ARTICLE_HTML = """<!doctype html>
+ARTICLE_PARAGRAPHS = (
+    "NVIDIA reported weak quarterly demand and a loss as orders for artificial intelligence infrastructure declined.",
+    "The company said data center customers delayed purchases of accelerated computing systems during the period.",
+    "Executives told investors that supply problems worsened while demand for newer chips fell below available capacity.",
+    "NVIDIA shares fell after the report because revenue and guidance missed the estimates cited by analysts.",
+    "Management announced shipment delays and described risks from lower spending on software and networking capacity.",
+    "The company expects weak customer demand to remain a risk while it cuts production with its partners.",
+)
+ARTICLE_HTML = f"""<!doctype html>
 <html>
   <head><title>NVIDIA article page</title></head>
   <body>
-    <article><p>NVIDIA reports weak demand and a loss in this full article.</p></article>
+    <article>{''.join(f'<p>{paragraph}</p>' for paragraph in ARTICLE_PARAGRAPHS)}</article>
   </body>
 </html>
 """
@@ -539,7 +547,15 @@ class CliTests(unittest.TestCase):
             self.assertEqual(extractions["attempted_fetches"], 1)
             self.assertEqual(extractions["successful_extractions"], 1)
             self.assertEqual(extractions["records"][0]["extraction_basis"], "full_text")
-            self.assertIn(extractions["records"][0]["extraction_method_used"], {"html_parser", "trafilatura"})
+            self.assertIn(
+                extractions["records"][0]["extraction_method_used"],
+                {
+                    "trafilatura_standard",
+                    "trafilatura_favor_recall",
+                    "trafilatura_baseline",
+                    "internal_article_parser",
+                },
+            )
             self.assertIsNone(extractions["records"][0]["extraction_failure_reason"])
             self.assertTrue(collected["articles"][0]["has_full_text"])
             self.assertEqual(scores[0]["basis"], "full_text")
@@ -638,6 +654,9 @@ class CliTests(unittest.TestCase):
             self.assertIn("newspaper3k_available", contract["extraction_summary"]["extractor_diagnostics"])
             self.assertTrue(contract["extraction_summary"]["extractor_diagnostics"]["internal_parser_available"])
             self.assertTrue(contract["extraction_summary"]["extraction_method_counts"])
+            self.assertIn("extraction_quality_grade_counts", contract["extraction_summary"])
+            self.assertEqual(contract["extraction_summary"]["full_text_accepted_count"], 1)
+            self.assertIn("extraction_quality_grade_counts", contract["extraction_coverage_diagnostics"])
             self.assertIn("extractor_diagnostics", payload)
             self.assertIn("extraction_method_counts", payload)
             self.assertIn("Article Extraction Summary", markdown)
@@ -655,7 +674,7 @@ class CliTests(unittest.TestCase):
             ):
                 self.assertIn(diagnostic, markdown)
                 self.assertIn(diagnostic, html)
-                self.assertIn(diagnostic, email_html)
+                self.assertNotIn(diagnostic, email_html)
 
     def test_backend_pool_can_exceed_capped_email_display(self):
         articles = [

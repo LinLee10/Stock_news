@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import hashlib
+import json
+from pathlib import Path
 import re
 from time import monotonic
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from .article_types import ARTICLE_TYPE_SERIOUSNESS, classify_article_type
 from .dedup import DedupeCluster
-from .extract import extract_article, extraction_dependency_status
+from .extract import extract_article, extract_url_metadata, extraction_dependency_status
 from .models import Article
 from .recency import article_recency
 from .source_quality import (
@@ -22,7 +25,7 @@ from .source_quality import (
     source_quality_sort_key,
 )
 from .ticker_matching import assess_ticker_matches
-from .tickers import load_portfolio, match_tickers
+from .tickers import load_portfolio, match_tickers, ticker_lookup
 
 
 DEFAULT_MAX_ARTICLE_FETCHES = 75
@@ -64,6 +67,17 @@ class ArticleExtractionRecord:
     source_provider: str = ""
     queue_score: float = 0.0
     queue_reasons: tuple[str, ...] = ()
+    status_code: int | None = None
+    canonical_link: str | None = None
+    og_url: str | None = None
+    extractor_methods_tried: tuple[str, ...] = ()
+    accepted_method: str | None = None
+    accepted_text_length: int = 0
+    extraction_quality_score: float = 0.0
+    extraction_quality_grade: str = "title_only"
+    extraction_quality_reasons: tuple[str, ...] = ()
+    accepted_as_full_text: bool = False
+    cache_hit: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -94,6 +108,17 @@ class ArticleExtractionRecord:
             "source_provider": self.source_provider,
             "queue_score": self.queue_score,
             "queue_reasons": list(self.queue_reasons),
+            "status_code": self.status_code,
+            "canonical_link": self.canonical_link,
+            "og_url": self.og_url,
+            "extractor_methods_tried": list(self.extractor_methods_tried),
+            "accepted_method": self.accepted_method,
+            "accepted_text_length": self.accepted_text_length,
+            "extraction_quality_score": self.extraction_quality_score,
+            "extraction_quality_grade": self.extraction_quality_grade,
+            "extraction_quality_reasons": list(self.extraction_quality_reasons),
+            "accepted_as_full_text": self.accepted_as_full_text,
+            "cache_hit": self.cache_hit,
         }
 
 
@@ -130,7 +155,7 @@ class ArticleFetchSummary:
     def basis_counts(self) -> dict[str, int]:
         counts = {"full_text": 0, "snippet": 0, "title": 0}
         for record in self.records:
-            if not record.fetched:
+            if not (record.fetched or record.cache_hit):
                 continue
             if record.extraction_basis in counts:
                 counts[record.extraction_basis] += 1
@@ -142,11 +167,11 @@ class ArticleFetchSummary:
 
     @property
     def google_news_wrappers_skipped(self) -> int:
-        return sum(1 for record in self.records if "google_news_unresolved" in record.failure_reasons)
+        return self.google_wrappers_unresolved
 
     @property
     def google_news_wrappers_resolved(self) -> int:
-        return sum(1 for record in self.records if record.resolution_status == "resolved_to_publisher")
+        return sum(1 for record in self.records if record.resolution_status.startswith("resolved_to_publisher"))
 
     @property
     def snippet_fallbacks(self) -> int:
@@ -168,11 +193,100 @@ class ArticleFetchSummary:
     def extraction_method_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for record in self.records:
-            method = record.extraction_method_used
-            if not method:
-                continue
-            counts[method] = counts.get(method, 0) + 1
+            for method in record.extractor_methods_tried:
+                counts[method] = counts.get(method, 0) + 1
         return counts
+
+    @property
+    def extraction_method_success_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in self.records:
+            if not record.accepted_as_full_text or not record.accepted_method:
+                continue
+            counts[record.accepted_method] = counts.get(record.accepted_method, 0) + 1
+        return counts
+
+    @property
+    def extraction_quality_grade_counts(self) -> dict[str, int]:
+        counts = {
+            "strong_full_text": 0,
+            "usable_full_text": 0,
+            "weak_text": 0,
+            "snippet_only": 0,
+            "title_only": 0,
+            "blocked_or_shell": 0,
+        }
+        for record in self.records:
+            grade = record.extraction_quality_grade
+            counts[grade] = counts.get(grade, 0) + 1
+        return counts
+
+    @property
+    def direct_publisher_candidates(self) -> int:
+        return sum(1 for record in self.records if record.url_classification == URL_CLASS_DIRECT_PUBLISHER)
+
+    @property
+    def google_wrapper_candidates(self) -> int:
+        return sum(1 for record in self.records if record.url_classification == URL_CLASS_GOOGLE_NEWS_WRAPPER)
+
+    @property
+    def google_wrappers_unresolved(self) -> int:
+        return sum(
+            1
+            for record in self.records
+            if "google_wrapper_unresolved" in record.failure_reasons
+            or "google_news_unresolved" in record.failure_reasons
+        )
+
+    @property
+    def publisher_profiles(self) -> tuple[dict[str, object], ...]:
+        profiles: dict[tuple[str, str], dict[str, object]] = {}
+        for record in self.records:
+            publisher = record.source_publisher or "unknown"
+            domain = urlparse(record.final_url or record.fetch_url or record.canonical_url).netloc.lower()
+            key = (publisher, domain)
+            profile = profiles.setdefault(
+                key,
+                {
+                    "publisher": publisher,
+                    "domain": domain,
+                    "fetch_allowed": record.url_classification != URL_CLASS_UNSUPPORTED,
+                    "paywall_likely": False,
+                    "direct_url_available": record.url_classification == URL_CLASS_DIRECT_PUBLISHER,
+                    "historical_success_count": 0,
+                    "historical_failure_count": 0,
+                    "last_failure_reason": None,
+                    "current_run_attempts": 0,
+                    "current_run_successes": 0,
+                    "current_run_success_rate": 0.0,
+                },
+            )
+            if record.fetched or record.cache_hit:
+                profile["current_run_attempts"] = int(profile["current_run_attempts"]) + 1
+            if record.accepted_as_full_text:
+                profile["current_run_successes"] = int(profile["current_run_successes"]) + 1
+            elif record.extraction_failure_reason:
+                profile["last_failure_reason"] = record.extraction_failure_reason
+            if "paywall_or_login" in record.failure_reasons:
+                profile["paywall_likely"] = True
+        for profile in profiles.values():
+            attempts = int(profile["current_run_attempts"])
+            profile["current_run_success_rate"] = (
+                round(int(profile["current_run_successes"]) / attempts, 4) if attempts else 0.0
+            )
+        return tuple(profiles[key] for key in sorted(profiles))
+
+    @property
+    def top_unresolved_wrapper_publishers(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in self.records:
+            if record.url_classification != URL_CLASS_GOOGLE_NEWS_WRAPPER:
+                continue
+            if record.resolution_status not in {"google_news_unresolved", "resolve_error"}:
+                continue
+            publisher = record.source_publisher or "unknown"
+            counts[publisher] = counts.get(publisher, 0) + 1
+        return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:10])
 
     @property
     def extraction_failure_reason(self) -> str | None:
@@ -213,6 +327,8 @@ class ArticleFetchSummary:
             "title_fallbacks": self.title_fallbacks,
             "top_extraction_failure_reasons": self.failure_reason_counts,
             "extraction_method_counts": self.extraction_method_counts,
+            "extractor_method_counts": self.extraction_method_counts,
+            "extractor_method_success_counts": self.extraction_method_success_counts,
             "extraction_failure_reason": self.extraction_failure_reason,
             "extractor_diagnostics": self.extractor_diagnostics or extraction_dependency_status(),
             "extraction_queue_size": self.extraction_queue_size,
@@ -225,6 +341,22 @@ class ArticleFetchSummary:
             "full_text_basis_count": self.basis_counts["full_text"],
             "snippet_basis_count": self.basis_counts["snippet"],
             "title_basis_count": self.basis_counts["title"],
+            "extraction_attempted_count": self.attempted_fetches,
+            "extraction_budget_unused_count": max(0, self.max_article_fetches - self.extraction_selected_count),
+            "direct_publisher_candidates": self.direct_publisher_candidates,
+            "google_wrapper_candidates": self.google_wrapper_candidates,
+            "google_wrappers_unresolved": self.google_wrappers_unresolved,
+            "full_text_accepted_count": self.successful_extractions,
+            "usable_full_text_count": self.extraction_quality_grade_counts.get("usable_full_text", 0),
+            "weak_text_count": self.extraction_quality_grade_counts.get("weak_text", 0),
+            "snippet_fallback_count": self.snippet_fallbacks,
+            "title_fallback_count": self.title_fallbacks,
+            "blocked_or_shell_count": self.extraction_quality_grade_counts.get("blocked_or_shell", 0),
+            "extraction_quality_grade_counts": self.extraction_quality_grade_counts,
+            "publisher_success_rates": self.extraction_success_rate_by_publisher,
+            "publisher_profiles": list(self.publisher_profiles),
+            "top_failure_reasons": self.failure_reason_counts,
+            "top_unresolved_wrapper_publishers": self.top_unresolved_wrapper_publishers,
             "records": [record.as_dict() for record in self.records],
         }
 
@@ -239,6 +371,7 @@ def fetch_top_cluster_articles(
     user_agent: str = DEFAULT_ARTICLE_FETCH_USER_AGENT,
     include_low_quality_sources: bool = False,
     min_source_quality_tier: int = DEFAULT_MIN_SOURCE_QUALITY_TIER,
+    cache_path: str | Path | None = None,
 ) -> tuple[dict[str, Article], ArticleFetchSummary]:
     """Fetch at most one article page for selected top event clusters."""
     max_article_fetches = max(0, int(max_article_fetches))
@@ -258,6 +391,7 @@ def fetch_top_cluster_articles(
         "selected_count": 0,
         "skipped_reasons": {},
     }
+    extraction_cache = _load_extraction_cache(cache_path)
 
     for article, tickers, requested_url, fetch_url, url_classification, resolution_status, resolution_record, queue_item in _iter_fetch_candidates(
         queue,
@@ -272,24 +406,39 @@ def fetch_top_cluster_articles(
         if resolution_record is not None:
             records.append(resolution_record)
             continue
-        enriched_article, record = _fetch_and_extract(
-            article,
-            tickers=tickers,
-            requested_url=requested_url,
-            fetch_url=fetch_url,
-            url_classification=url_classification,
-            resolution_status=resolution_status,
-            timeout_seconds=fetch_timeout_seconds,
-            user_agent=user_agent,
-            queue_item=queue_item,
-        )
+        cached = _find_cached_extraction(extraction_cache, requested_url, fetch_url)
+        if cached is not None:
+            enriched_article, record = _cached_extraction(
+                article,
+                tickers=tickers,
+                requested_url=requested_url,
+                fetch_url=fetch_url,
+                url_classification=url_classification,
+                resolution_status=resolution_status,
+                queue_item=queue_item,
+                cached=cached,
+            )
+        else:
+            enriched_article, record = _fetch_and_extract(
+                article,
+                tickers=tickers,
+                requested_url=requested_url,
+                fetch_url=fetch_url,
+                url_classification=url_classification,
+                resolution_status=resolution_status,
+                timeout_seconds=fetch_timeout_seconds,
+                user_agent=user_agent,
+                queue_item=queue_item,
+            )
+            _cache_extraction(extraction_cache, record, enriched_article)
         records.append(record)
         if enriched_article is not None:
             enriched[article.canonical_url] = enriched_article
+    _write_extraction_cache(cache_path, extraction_cache)
 
-    successful = sum(1 for record in records if record.fetched and record.extraction_basis == "full_text")
+    successful = sum(1 for record in records if record.accepted_as_full_text)
     fetched = sum(1 for record in records if record.fetched)
-    failed = fetched - successful
+    failed = sum(1 for record in records if record.fetched and not record.accepted_as_full_text)
     skipped_reasons = dict(queue_diagnostics["skipped_reasons"])
     skipped_count = sum(int(count) for count in skipped_reasons.values())
     return enriched, ArticleFetchSummary(
@@ -433,7 +582,7 @@ def _iter_fetch_candidates(
         if cluster_key in selected_clusters:
             _increment(skipped_reasons, "lower_ranked_cluster_candidate")
             continue
-        if int(queue_diagnostics["selected_count"]) >= max_article_fetches:
+        if attempted_fetches >= max_article_fetches:
             _increment(skipped_reasons, "max_article_fetches")
             continue
         budget_ticker = item.primary_ticker or (item.tickers[0] if item.tickers else None)
@@ -448,10 +597,6 @@ def _iter_fetch_candidates(
         article = item.cluster.canonical_article
         requested_url = candidate_article.canonical_url
         url_classification = classify_article_url(requested_url)
-        queue_diagnostics["selected_count"] = int(queue_diagnostics["selected_count"]) + 1
-        selected_clusters.add(cluster_key)
-        if budget_ticker:
-            ticker_counts[budget_ticker] = ticker_counts.get(budget_ticker, 0) + 1
         resolution_status = "direct_publisher_url"
         fetch_url = requested_url
         if url_classification == URL_CLASS_GOOGLE_NEWS_WRAPPER:
@@ -471,11 +616,19 @@ def _iter_fetch_candidates(
                     final_url=resolved.final_url,
                     latency_ms=resolved.latency_ms,
                     queue_item=item,
+                    canonical_link=resolved.canonical_url,
+                    og_url=resolved.og_url,
+                    extraction_quality_grade="blocked_or_shell",
+                    extraction_quality_reasons=("blocked_or_shell", "google_wrapper_unresolved"),
                 ), item
                 continue
             fetch_url = resolved.resolved_url
-            resolution_status = "resolved_to_publisher"
+            resolution_status = resolved.status
         attempted_fetches += 1
+        queue_diagnostics["selected_count"] = attempted_fetches
+        selected_clusters.add(cluster_key)
+        if budget_ticker:
+            ticker_counts[budget_ticker] = ticker_counts.get(budget_ticker, 0) + 1
         yield article, item.tickers, requested_url, fetch_url, url_classification, resolution_status, None, item
 
 
@@ -519,6 +672,13 @@ def _is_fetchable_url(url: str) -> bool:
     return urlparse(url).scheme in {"http", "https"}
 
 
+def _absolute_http_url(value: object, base_url: str | None) -> str | None:
+    if not value:
+        return None
+    absolute = urljoin(base_url or "", str(value).strip())
+    return absolute if _is_fetchable_url(absolute) else None
+
+
 def classify_article_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
@@ -546,11 +706,15 @@ def _fetch_and_extract(
     final_url = fetch_url
     content_type = None
     content_length = 0
+    status_code = None
     try:
         request = Request(fetch_url, headers={"User-Agent": user_agent})
         with urlopen(request, timeout=timeout_seconds) as response:
             raw_bytes = response.read()
             final_url = getattr(response, "url", fetch_url)
+            status_code = getattr(response, "status", None)
+            if status_code is None and hasattr(response, "getcode"):
+                status_code = response.getcode()
             content_type = response.headers.get("Content-Type") if getattr(response, "headers", None) else None
         content_length = len(raw_bytes)
         if _is_google_news_url(final_url):
@@ -568,6 +732,9 @@ def _fetch_and_extract(
                 content_type=content_type,
                 content_length=content_length,
                 queue_item=queue_item,
+                status_code=status_code,
+                extraction_quality_grade="blocked_or_shell",
+                extraction_quality_reasons=("blocked_or_shell", "google_wrapper_unresolved"),
             )
         if not _is_html_content_type(content_type):
             return None, _fetched_failure_record(
@@ -584,6 +751,7 @@ def _fetch_and_extract(
                 content_type=content_type,
                 content_length=content_length,
                 queue_item=queue_item,
+                status_code=status_code,
             )
         raw_html = raw_bytes.decode("utf-8", errors="replace")
         result = extract_article(
@@ -591,12 +759,17 @@ def _fetch_and_extract(
             url=final_url,
             title=article.title,
             snippet=article.snippet,
+            ticker_terms=_ticker_context_terms(tickers),
         )
         latency_ms = int((monotonic() - started) * 1000)
         text = result.main_text.strip()
         text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None
-        failure_reasons = _failure_reasons(result.extraction_basis, result.extraction_error)
-        extraction_failure_reason = result.extraction_failure_reason or _primary_failure_reason(failure_reasons)
+        failure_reasons = _failure_reasons(
+            result.extraction_basis,
+            result.extraction_error,
+            result.extraction_quality_reasons,
+        )
+        extraction_failure_reason = _primary_failure_reason(failure_reasons)
         record = ArticleExtractionRecord(
             article_id=article.article_id,
             canonical_url=article.canonical_url,
@@ -625,12 +798,30 @@ def _fetch_and_extract(
             source_provider=str(queue_item.article.metadata.get("provider") or ""),
             queue_score=queue_item.score,
             queue_reasons=queue_item.score_reasons,
+            status_code=status_code,
+            canonical_link=_absolute_http_url(result.canonical_url, final_url),
+            og_url=_absolute_http_url(result.og_url, final_url),
+            extractor_methods_tried=tuple(attempt.method_name for attempt in result.attempts),
+            accepted_method=result.extraction_method_used if result.accepted_as_full_text else None,
+            accepted_text_length=len(text) if result.accepted_as_full_text else 0,
+            extraction_quality_score=result.extraction_quality_score,
+            extraction_quality_grade=result.extraction_quality_grade,
+            extraction_quality_reasons=result.extraction_quality_reasons,
+            accepted_as_full_text=result.accepted_as_full_text,
         )
-        if result.extraction_basis == "full_text" and text:
+        if result.accepted_as_full_text and result.extraction_basis == "full_text" and text:
             return _with_full_text(article, text, record), record
         return None, record
     except Exception as exc:  # noqa: BLE001 - fetch failures must not fail dry runs.
         latency_ms = int((monotonic() - started) * 1000)
+        blocked_reasons = (
+            ("blocked_or_shell", "paywall_or_login")
+            if isinstance(exc, HTTPError) and exc.code in {401, 403}
+            else ()
+        )
+        failure_reasons = _normalize_reasons(
+            ("fetch_error", type(exc).__name__, *blocked_reasons, _fallback_reason(article))
+        )
         return None, ArticleExtractionRecord(
             article_id=article.article_id,
             canonical_url=article.canonical_url,
@@ -638,7 +829,7 @@ def _fetch_and_extract(
             extraction_status="failed",
             extraction_basis=_fallback_basis(article),
             error_class=type(exc).__name__,
-            failure_reasons=_normalize_reasons(("fetch_error", type(exc).__name__, _fallback_reason(article))),
+            failure_reasons=failure_reasons,
             url_classification=url_classification,
             requested_url=requested_url,
             fetch_url=fetch_url,
@@ -652,13 +843,16 @@ def _fetch_and_extract(
             extracted_preview=None,
             extractor=None,
             extraction_method_used=None,
-            extraction_failure_reason=_primary_failure_reason(_normalize_reasons(("fetch_error", type(exc).__name__, _fallback_reason(article)))),
+            extraction_failure_reason=_primary_failure_reason(failure_reasons),
             fetched=True,
             tickers=tickers,
             source_publisher=str(queue_item.article.metadata.get("source_name") or ""),
             source_provider=str(queue_item.article.metadata.get("provider") or ""),
             queue_score=queue_item.score,
             queue_reasons=queue_item.score_reasons,
+            status_code=exc.code if isinstance(exc, HTTPError) else status_code,
+            extraction_quality_grade="blocked_or_shell" if isinstance(exc, HTTPError) and exc.code in {401, 403} else "title_only",
+            extraction_quality_reasons=blocked_reasons or ("fetch_error",),
         )
 
 
@@ -672,6 +866,10 @@ def _with_full_text(article: Article, full_text: str, record: ArticleExtractionR
         "extraction_requested_url": record.requested_url,
         "extraction_fetch_url": record.fetch_url,
         "extraction_url_classification": record.url_classification,
+        "extraction_quality_score": record.extraction_quality_score,
+        "extraction_quality_grade": record.extraction_quality_grade,
+        "extraction_method": record.accepted_method,
+        "extraction_cache_hit": record.cache_hit,
     }
     return Article(
         canonical_url=article.canonical_url,
@@ -683,6 +881,18 @@ def _with_full_text(article: Article, full_text: str, record: ArticleExtractionR
         metadata=metadata,
         created_at=article.created_at,
     )
+
+
+def _ticker_context_terms(tickers: tuple[str, ...]) -> tuple[str, ...]:
+    lookup = ticker_lookup()
+    terms: list[str] = []
+    for symbol in tickers:
+        ticker = lookup.get(symbol)
+        if ticker is None:
+            terms.append(symbol)
+            continue
+        terms.extend(ticker.match_terms)
+    return tuple(dict.fromkeys(terms))
 
 
 def _fallback_basis(article: Article) -> str:
@@ -698,6 +908,149 @@ def _preview(text: str) -> str | None:
     return collapsed[:280]
 
 
+def _load_extraction_cache(cache_path: str | Path | None) -> dict[str, dict[str, object]]:
+    if cache_path is None:
+        return {}
+    path = Path(cache_path)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    entries = payload.get("entries", {}) if isinstance(payload, dict) else {}
+    return {
+        str(key): dict(value)
+        for key, value in entries.items()
+        if isinstance(value, dict)
+    }
+
+
+def _write_extraction_cache(
+    cache_path: str | Path | None,
+    cache: dict[str, dict[str, object]],
+) -> None:
+    if cache_path is None:
+        return
+    path = Path(cache_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"version": 1, "entries": cache}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _find_cached_extraction(
+    cache: dict[str, dict[str, object]],
+    requested_url: str,
+    fetch_url: str,
+) -> dict[str, object] | None:
+    for key in (requested_url, fetch_url):
+        if key in cache:
+            return cache[key]
+    return None
+
+
+def _cache_extraction(
+    cache: dict[str, dict[str, object]],
+    record: ArticleExtractionRecord,
+    enriched_article: Article | None,
+) -> None:
+    entry: dict[str, object] = {
+        "canonical_url": record.canonical_link or record.canonical_url,
+        "final_url": record.final_url,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "content_type": record.content_type,
+        "status_code": record.status_code,
+        "extractor_methods_tried": list(record.extractor_methods_tried),
+        "accepted_method": record.accepted_method,
+        "accepted_text_hash": record.text_hash,
+        "accepted_text_length": record.accepted_text_length,
+        "quality_score": record.extraction_quality_score,
+        "quality_grade": record.extraction_quality_grade,
+        "quality_reasons": list(record.extraction_quality_reasons),
+        "success": record.accepted_as_full_text,
+        "failure_reason": record.extraction_failure_reason,
+        "accepted_text": enriched_article.full_text if enriched_article and enriched_article.full_text else None,
+    }
+    keys = (
+        record.requested_url,
+        record.fetch_url,
+        record.final_url,
+        record.canonical_link,
+        record.og_url,
+    )
+    for key in keys:
+        if key:
+            cache[str(key)] = entry
+
+
+def _cached_extraction(
+    article: Article,
+    *,
+    tickers: tuple[str, ...],
+    requested_url: str,
+    fetch_url: str,
+    url_classification: str,
+    resolution_status: str,
+    queue_item: ExtractionQueueItem,
+    cached: dict[str, object],
+) -> tuple[Article | None, ArticleExtractionRecord]:
+    text = str(cached.get("accepted_text") or "").strip()
+    success = bool(cached.get("success")) and bool(text)
+    fallback_basis = _fallback_basis(article)
+    quality_reasons = tuple(str(value) for value in cached.get("quality_reasons", ()) if value)
+    failure_reasons = () if success else _normalize_reasons(
+        (
+            str(cached.get("failure_reason") or "cached_extraction_failure"),
+            *quality_reasons,
+            _fallback_reason(article),
+        )
+    )
+    record = ArticleExtractionRecord(
+        article_id=article.article_id,
+        canonical_url=article.canonical_url,
+        title=article.title,
+        extraction_status="success" if success else "fallback",
+        extraction_basis="full_text" if success else fallback_basis,
+        error_class=None if success else _primary_failure_reason(failure_reasons),
+        failure_reasons=failure_reasons,
+        url_classification=url_classification,
+        requested_url=requested_url,
+        fetch_url=fetch_url,
+        resolved_url=fetch_url if fetch_url != requested_url else None,
+        resolution_status=f"{resolution_status}_cache_hit",
+        final_url=str(cached.get("final_url") or fetch_url),
+        latency_ms=0,
+        content_type=str(cached.get("content_type") or "") or None,
+        content_length=0,
+        text_hash=str(cached.get("accepted_text_hash") or "") or None,
+        extracted_preview=_preview(text),
+        extractor=str(cached.get("accepted_method") or "cache"),
+        extraction_method_used=str(cached.get("accepted_method") or "cache"),
+        extraction_failure_reason=None if success else _primary_failure_reason(failure_reasons),
+        fetched=False,
+        tickers=tickers,
+        source_publisher=str(queue_item.article.metadata.get("source_name") or ""),
+        source_provider=str(queue_item.article.metadata.get("provider") or ""),
+        queue_score=queue_item.score,
+        queue_reasons=queue_item.score_reasons,
+        status_code=int(cached["status_code"]) if cached.get("status_code") is not None else None,
+        canonical_link=str(cached.get("canonical_url") or "") or None,
+        extractor_methods_tried=tuple(str(value) for value in cached.get("extractor_methods_tried", ()) if value),
+        accepted_method=str(cached.get("accepted_method") or "") or None,
+        accepted_text_length=int(cached.get("accepted_text_length") or 0),
+        extraction_quality_score=float(cached.get("quality_score") or 0.0),
+        extraction_quality_grade=str(cached.get("quality_grade") or fallback_basis),
+        extraction_quality_reasons=quality_reasons,
+        accepted_as_full_text=success,
+        cache_hit=True,
+    )
+    if success:
+        return _with_full_text(article, text, record), record
+    return None, record
+
+
 @dataclass(frozen=True)
 class _ResolvedUrl:
     resolved_url: str | None
@@ -705,6 +1058,8 @@ class _ResolvedUrl:
     status: str
     latency_ms: int
     error_class: str | None = None
+    canonical_url: str | None = None
+    og_url: str | None = None
 
 
 def _cluster_fetch_articles(cluster: DedupeCluster) -> tuple[Article, ...]:
@@ -753,10 +1108,39 @@ def _resolve_google_news_url(
         request = Request(url, headers={"User-Agent": user_agent})
         with urlopen(request, timeout=timeout_seconds) as response:
             final_url = getattr(response, "url", url)
+            raw_html = response.read().decode("utf-8", errors="replace")
         latency_ms = int((monotonic() - started) * 1000)
         if final_url and not _is_google_news_url(final_url):
             return _ResolvedUrl(final_url, final_url, "resolved_to_publisher", latency_ms)
-        return _ResolvedUrl(None, final_url, "google_news_unresolved", latency_ms, "google_news_unresolved")
+        metadata = extract_url_metadata(raw_html)
+        canonical_url = _absolute_http_url(metadata.get("canonical_url"), final_url)
+        og_url = _absolute_http_url(metadata.get("og_url"), final_url)
+        publisher_url = next(
+            (
+                candidate
+                for candidate in (canonical_url, og_url)
+                if candidate and not _is_google_news_url(candidate)
+            ),
+            None,
+        )
+        if publisher_url:
+            return _ResolvedUrl(
+                publisher_url,
+                final_url,
+                "resolved_to_publisher_metadata",
+                latency_ms,
+                canonical_url=canonical_url,
+                og_url=og_url,
+            )
+        return _ResolvedUrl(
+            None,
+            final_url,
+            "google_news_unresolved",
+            latency_ms,
+            "google_wrapper_unresolved",
+            canonical_url,
+            og_url,
+        )
     except (HTTPError, URLError, TimeoutError, OSError) as exc:
         latency_ms = int((monotonic() - started) * 1000)
         return _ResolvedUrl(None, final_url, "resolve_error", latency_ms, type(exc).__name__)
@@ -776,8 +1160,12 @@ def _skipped_record(
     final_url: str | None = None,
     latency_ms: int = 0,
     queue_item: ExtractionQueueItem | None = None,
+    canonical_link: str | None = None,
+    og_url: str | None = None,
+    extraction_quality_grade: str = "title_only",
+    extraction_quality_reasons: tuple[str, ...] = (),
 ) -> ArticleExtractionRecord:
-    failure_reasons = _normalize_reasons((reason,))
+    failure_reasons = _normalize_reasons((reason, *extraction_quality_reasons))
     return ArticleExtractionRecord(
         article_id=article.article_id,
         canonical_url=article.canonical_url,
@@ -806,6 +1194,10 @@ def _skipped_record(
         source_provider=str(queue_item.article.metadata.get("provider") or "") if queue_item else "",
         queue_score=queue_item.score if queue_item else 0.0,
         queue_reasons=queue_item.score_reasons if queue_item else (),
+        canonical_link=canonical_link,
+        og_url=og_url,
+        extraction_quality_grade=extraction_quality_grade,
+        extraction_quality_reasons=extraction_quality_reasons,
     )
 
 
@@ -824,8 +1216,11 @@ def _fetched_failure_record(
     content_type: str | None,
     content_length: int,
     queue_item: ExtractionQueueItem | None = None,
+    status_code: int | None = None,
+    extraction_quality_grade: str = "title_only",
+    extraction_quality_reasons: tuple[str, ...] = (),
 ) -> ArticleExtractionRecord:
-    failure_reasons = _normalize_reasons((reason, _fallback_reason(article)))
+    failure_reasons = _normalize_reasons((reason, *extraction_quality_reasons, _fallback_reason(article)))
     return ArticleExtractionRecord(
         article_id=article.article_id,
         canonical_url=article.canonical_url,
@@ -854,6 +1249,9 @@ def _fetched_failure_record(
         source_provider=str(queue_item.article.metadata.get("provider") or "") if queue_item else "",
         queue_score=queue_item.score if queue_item else 0.0,
         queue_reasons=queue_item.score_reasons if queue_item else (),
+        status_code=status_code,
+        extraction_quality_grade=extraction_quality_grade,
+        extraction_quality_reasons=extraction_quality_reasons,
     )
 
 
@@ -877,11 +1275,11 @@ def _success_rates(
     totals: dict[str, int] = {}
     successes: dict[str, int] = {}
     for record in records:
-        if not record.fetched:
+        if not (record.fetched or record.cache_hit):
             continue
         key = str(getattr(record, field_name) or "unknown")
         totals[key] = totals.get(key, 0) + 1
-        if record.extraction_basis == "full_text":
+        if record.accepted_as_full_text:
             successes[key] = successes.get(key, 0) + 1
     return {
         key: round(successes.get(key, 0) / total, 4)
@@ -890,14 +1288,16 @@ def _success_rates(
     }
 
 
-def _failure_reasons(extraction_basis: str, extraction_error: str | None) -> tuple[str, ...]:
+def _failure_reasons(
+    extraction_basis: str,
+    extraction_error: str | None,
+    quality_reasons: tuple[str, ...] = (),
+) -> tuple[str, ...]:
     if extraction_basis == "full_text":
         return ()
-    reasons: list[str] = []
+    reasons: list[str] = ["no_article_body", *quality_reasons]
     if extraction_error:
         reasons.extend(part.strip() for part in extraction_error.split(";") if part.strip())
-    if "no_article_body" not in reasons:
-        reasons.append("no_article_body")
     if extraction_basis == "snippet":
         reasons.append("snippet_fallback")
     elif extraction_basis == "title":

@@ -52,6 +52,22 @@ class ExtractionSummary:
     extraction_success_rate: float = 0.0
     extraction_success_rate_by_publisher: Mapping[str, float] = field(default_factory=dict)
     extraction_success_rate_by_source_provider: Mapping[str, float] = field(default_factory=dict)
+    extraction_attempted_count: int = 0
+    extraction_budget_unused_count: int = 0
+    direct_publisher_candidates: int = 0
+    google_wrapper_candidates: int = 0
+    google_wrappers_unresolved: int = 0
+    full_text_accepted_count: int = 0
+    usable_full_text_count: int = 0
+    weak_text_count: int = 0
+    snippet_fallback_count: int = 0
+    title_fallback_count: int = 0
+    blocked_or_shell_count: int = 0
+    extraction_quality_grade_counts: Mapping[str, int] = field(default_factory=dict)
+    extractor_method_success_counts: Mapping[str, int] = field(default_factory=dict)
+    publisher_success_rates: Mapping[str, float] = field(default_factory=dict)
+    publisher_profiles: tuple[Mapping[str, object], ...] = ()
+    top_unresolved_wrapper_publishers: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -768,6 +784,16 @@ def _extraction_summary_html(summary: ExtractionSummary) -> str:
             f"<td class=\"num\">{summary.extraction_selected_count}</td>"
             f"<td class=\"num\">{summary.extraction_skipped_count}</td>"
             f"<td class=\"num\">{summary.extraction_success_rate:.1%}</td>"
+            "</tr>",
+            "  </table>",
+            "  <table>",
+            "    <tr><th>Strong Full Text</th><th>Usable Full Text</th><th>Weak Text</th><th>Blocked or Shell</th><th>Unresolved Wrappers</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{int(summary.extraction_quality_grade_counts.get('strong_full_text', 0))}</td>"
+            f"<td class=\"num\">{summary.usable_full_text_count}</td>"
+            f"<td class=\"num\">{summary.weak_text_count}</td>"
+            f"<td class=\"num\">{summary.blocked_or_shell_count}</td>"
+            f"<td class=\"num\">{summary.google_wrappers_unresolved}</td>"
             "</tr>",
             "  </table>",
             _failure_reasons_html(summary.top_extraction_failure_reasons),

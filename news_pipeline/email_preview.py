@@ -256,42 +256,33 @@ def _sentiment_table(title: str, rows: tuple[object, ...]) -> str:
 def _extraction_summary(report: DailyReportContract) -> str:
     summary = report.extraction_summary
     basis_counts = {basis: int(summary.sentiment_basis_counts.get(basis, 0)) for basis in ("full_text", "snippet", "title")}
-    return "\n".join(
-        [
-            "    <h2>Article Extraction Summary</h2>",
-            "    <table>",
-            "      <tr><th>Article Fetch Attempts</th><th>Publisher Article Fetches</th><th>Google Wrappers Skipped</th><th>Google Wrappers Resolved</th><th>Full Text Successes</th><th>Snippet Fallbacks</th><th>Title Fallbacks</th></tr>",
-            "      <tr>"
-            f"<td class=\"num\">{summary.article_pages_fetched}</td>"
-            f"<td class=\"num\">{summary.publisher_article_fetches}</td>"
-            f"<td class=\"num\">{summary.google_news_wrappers_skipped}</td>"
-            f"<td class=\"num\">{summary.google_news_wrappers_resolved}</td>"
-            f"<td class=\"num\">{summary.successful_extractions}</td>"
-            f"<td class=\"num\">{summary.snippet_fallbacks}</td>"
-            f"<td class=\"num\">{summary.title_fallbacks}</td>"
-            "</tr>",
-            "    </table>",
-            "    <table>",
-            "      <tr><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th></tr>",
-            "      <tr>"
-            f"<td class=\"num\">{basis_counts['full_text']}</td>"
-            f"<td class=\"num\">{basis_counts['snippet']}</td>"
-            f"<td class=\"num\">{basis_counts['title']}</td>"
-            "</tr>",
-            "    </table>",
-            "    <table>",
-            "      <tr><th>Queue Size</th><th>Selected</th><th>Skipped</th><th>Success Rate</th></tr>",
-            "      <tr>"
-            f"<td class=\"num\">{summary.extraction_queue_size}</td>"
-            f"<td class=\"num\">{summary.extraction_selected_count}</td>"
-            f"<td class=\"num\">{summary.extraction_skipped_count}</td>"
-            f"<td class=\"num\">{summary.extraction_success_rate:.1%}</td>"
-            "</tr>",
-            "    </table>",
-            _failure_reasons(summary.top_extraction_failure_reasons),
-            _extraction_diagnostics(summary),
-        ]
-    )
+    total_basis = sum(basis_counts.values())
+    full_text_coverage = basis_counts["full_text"] / total_basis if total_basis else 0.0
+    parts = [
+        "    <h2>Article Extraction Summary</h2>",
+        "    <table>",
+        "      <tr><th>Selected</th><th>Full Text Accepted</th><th>Usable Full Text</th><th>Coverage Rate</th></tr>",
+        "      <tr>"
+        f"<td class=\"num\">{summary.extraction_selected_count}</td>"
+        f"<td class=\"num\">{summary.full_text_accepted_count}</td>"
+        f"<td class=\"num\">{summary.usable_full_text_count}</td>"
+        f"<td class=\"num\">{full_text_coverage:.1%}</td>"
+        "</tr>",
+        "    </table>",
+        "    <table>",
+        "      <tr><th>Full Text Basis</th><th>Snippet Basis</th><th>Title Basis</th></tr>",
+        "      <tr>"
+        f"<td class=\"num\">{basis_counts['full_text']}</td>"
+        f"<td class=\"num\">{basis_counts['snippet']}</td>"
+        f"<td class=\"num\">{basis_counts['title']}</td>"
+        "</tr>",
+        "    </table>",
+    ]
+    if total_basis and full_text_coverage < 0.4:
+        parts.append(
+            "    <p class=\"muted\">Full text coverage is low; sentiment still relies heavily on snippets or titles.</p>"
+        )
+    return "\n".join(parts)
 
 
 def _source_quality_summary(report: DailyReportContract) -> str:

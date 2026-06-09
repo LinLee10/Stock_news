@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from news_pipeline.article_fetch import (
@@ -13,11 +15,19 @@ from news_pipeline.dedup import DedupeCluster, SourceLink, cluster_articles
 from news_pipeline.models import Article
 
 
-ARTICLE_HTML = """<!doctype html>
+ARTICLE_PARAGRAPHS = (
+    "NVIDIA reported quarterly revenue growth as demand for artificial intelligence infrastructure remained strong.",
+    "The company said data center customers continued ordering accelerated computing systems during the period.",
+    "Executives told investors that supply improved while demand for newer chips remained above available capacity.",
+    "NVIDIA shares moved after the report because revenue and guidance exceeded the estimates cited by analysts.",
+    "Management announced additional product shipments and described investment in software and networking capacity.",
+    "The company expects customer demand to remain a central driver while it expands production with its partners.",
+)
+ARTICLE_HTML = f"""<!doctype html>
 <html>
   <head><title>NVIDIA article page</title></head>
   <body>
-    <article><p>NVIDIA reports weak demand and a loss in this full article.</p></article>
+    <article>{''.join(f'<p>{paragraph}</p>' for paragraph in ARTICLE_PARAGRAPHS)}</article>
   </body>
 </html>
 """
@@ -129,6 +139,24 @@ class ArticleFetchTests(unittest.TestCase):
         self.assertEqual(summary.records[0].resolution_status, "resolved_to_publisher")
         self.assertIn(google.canonical_url, enriched)
 
+    def test_unresolved_google_wrapper_does_not_consume_extraction_budget(self):
+        google = _article("https://news.google.com/rss/articles/unresolved", "NVIDIA wrapper")
+        with patch(
+            "news_pipeline.article_fetch.urlopen",
+            return_value=FakeHttpResponse(EMPTY_HTML, url=google.canonical_url),
+        ):
+            _enriched, summary = fetch_top_cluster_articles(
+                (_cluster(google, (google,)),),
+                run_date="2026-06-04",
+                max_article_fetches=1,
+            )
+
+        self.assertEqual(summary.attempted_fetches, 0)
+        self.assertEqual(summary.extraction_selected_count, 0)
+        self.assertEqual(summary.as_dict()["extraction_budget_unused_count"], 1)
+        self.assertEqual(summary.google_wrappers_unresolved, 1)
+        self.assertIn("google_wrapper_unresolved", summary.records[0].failure_reasons)
+
     def test_failure_reasons_are_explicit_for_non_article_html_and_fallbacks(self):
         direct = _article("https://publisher.example.com/empty", "NVIDIA empty", snippet="NVIDIA snippet text.")
         with patch("news_pipeline.article_fetch.urlopen", return_value=FakeHttpResponse(EMPTY_HTML, url=direct.canonical_url)):
@@ -171,11 +199,49 @@ class ArticleFetchTests(unittest.TestCase):
         record = summary.records[0]
         payload = summary.as_dict()
         self.assertEqual(record.extraction_basis, "full_text")
-        self.assertIn(record.extraction_method_used, {"html_parser", "trafilatura"})
+        self.assertIn(
+            record.extraction_method_used,
+            {
+                "trafilatura_standard",
+                "trafilatura_favor_recall",
+                "trafilatura_baseline",
+                "internal_article_parser",
+            },
+        )
         self.assertIsNone(record.extraction_failure_reason)
         self.assertIn("extraction_method_used", payload["records"][0])
         self.assertIn("extraction_failure_reason", payload["records"][0])
         self.assertIn("extraction_method_counts", payload)
+        self.assertIn("extraction_quality_grade_counts", payload)
+        self.assertTrue(record.accepted_as_full_text)
+
+    def test_cache_prevents_duplicate_fetch_for_same_url(self):
+        direct = _article("https://publisher.example.com/nvidia-cache", "NVIDIA publisher")
+        cluster = _cluster(direct, (direct,))
+        with TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / "extraction_cache.json"
+            with patch("news_pipeline.article_fetch.urlopen", return_value=_html_response(direct.canonical_url)) as first_fetch:
+                _enriched, first_summary = fetch_top_cluster_articles(
+                    (cluster,),
+                    run_date="2026-06-04",
+                    cache_path=cache_path,
+                )
+            with patch(
+                "news_pipeline.article_fetch.urlopen",
+                side_effect=AssertionError("cached URL must not be fetched again"),
+            ):
+                enriched, second_summary = fetch_top_cluster_articles(
+                    (cluster,),
+                    run_date="2026-06-04",
+                    cache_path=cache_path,
+                )
+
+        self.assertEqual(first_fetch.call_count, 1)
+        self.assertEqual(first_summary.successful_extractions, 1)
+        self.assertEqual(second_summary.attempted_fetches, 0)
+        self.assertEqual(second_summary.successful_extractions, 1)
+        self.assertTrue(second_summary.records[0].cache_hit)
+        self.assertIn(direct.canonical_url, enriched)
 
     def test_extraction_queue_prioritizes_high_quality_ticker_specific_article(self):
         high = _article(
