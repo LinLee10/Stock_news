@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
+from urllib.parse import quote_plus
 
 from news_pipeline.article_fetch import URL_CLASS_DIRECT_PUBLISHER, classify_article_url
 from news_pipeline.models import Article
@@ -13,15 +14,23 @@ from news_pipeline.tickers import TrackedTicker
 
 from .acquisition_scoring import annotate_acquisition_scores, source_diversity_metrics
 from .compliance import collection_decision
+from .external_api import (
+    ExternalApiCollectionResult,
+    HttpJsonFetcher,
+    collect_external_api_articles,
+)
 from .live_rss import LiveRssAttempt, collect_live_rss_articles
+from .query_planner import TickerQueryPlan, plan_ticker_queries, provider_query_plans
 from .rss_config import RssFeedConfig, RssSourceFamilyConfig
 from .sec_edgar import SecCollectionAttempt, collect_sec_edgar_articles
 from .source_registry import (
     COMPANY_IR,
+    CONTEXT_NEWS_API,
     DIRECT_NEWS_PUBLISHER,
+    EXTERNAL_GENERAL_NEWS_API,
+    EXTERNAL_MARKET_NEWS_API,
     GOOGLE_NEWS_BACKSTOP,
     MARKET_DATA_OR_ANALYSIS,
-    PAID_NEWS_API,
     PRESS_RELEASE_WIRE,
     REGULATORY_OFFICIAL,
     SOURCE_FAMILY_ORDER,
@@ -85,14 +94,39 @@ def schedule_sources(
     max_google_news_share: float,
     include_press_release_feeds: bool,
     include_sec_feeds: bool,
-    paid_api_global_enabled: bool,
-    paid_provider_flags: Mapping[str, bool],
-    environ: Mapping[str, str],
+    paid_api_global_enabled: bool = False,
+    paid_provider_flags: Mapping[str, bool] | None = None,
+    environ: Mapping[str, str] | None = None,
     quota_guard_allows: bool = True,
     rss_collector: RssCollector = collect_live_rss_articles,
     sec_collector: SecCollector = collect_sec_edgar_articles,
     paid_collectors: Mapping[str, PaidCollector] | None = None,
+    external_api_global_enabled: bool | None = None,
+    external_provider_flags: Mapping[str, bool] | None = None,
+    max_external_api_requests_total: int = 25,
+    external_provider_request_budgets: Mapping[str, int] | None = None,
+    minimum_articles_per_ticker: int = 5,
+    target_articles_per_ticker: int = 15,
+    external_fetch_json: HttpJsonFetcher | None = None,
 ) -> SourceScheduleResult:
+    environ = environ or {}
+    legacy_provider_flags = dict(paid_provider_flags or {})
+    provider_flags = dict(external_provider_flags or legacy_provider_flags)
+    external_enabled = (
+        bool(paid_api_global_enabled)
+        if external_api_global_enabled is None
+        else bool(external_api_global_enabled)
+    )
+    provider_budgets = dict(
+        external_provider_request_budgets
+        or {
+            "marketaux": 10,
+            "nyt": 10,
+            "gnews": 5,
+            "finnhub_news": 5,
+            "newsapi": 5,
+        }
+    )
     profile_by_id = {profile.source_id: profile for profile in profiles}
     enabled = [
         profile
@@ -109,7 +143,36 @@ def schedule_sources(
         for ticker in tracked_tickers
         if ticker.symbol not in company_ir_profiles
     ]
-    paid_skips: dict[str, str] = {}
+    query_plans = plan_ticker_queries(tracked_tickers)
+    external_result = ExternalApiCollectionResult(
+        articles=(),
+        attempts=(),
+        diagnostics={
+            "external_api_provider_usage": [],
+            "external_api_provider_skipped_reasons": {},
+            "external_api_requests_used_by_provider": {},
+            "external_api_articles_by_provider": {},
+            "external_api_articles_by_ticker": {},
+            "raw_external_articles_by_provider": {},
+            "raw_external_articles_by_ticker": {},
+            "external_api_total_requests_used": 0,
+            "external_api_total_request_budget": max_external_api_requests_total,
+            "quota_budget_remaining_estimate": max_external_api_requests_total,
+            "gnews_status_code": None,
+            "gnews_error_reason": None,
+            "gnews_requests_attempted": 0,
+            "gnews_articles_returned": 0,
+            "gnews_skipped_reason": "global_external_api_flag_disabled",
+            "gnews_effective_endpoint_without_key": None,
+            "gnews_effective_params_without_key": {},
+            "nyt_requests_attempted": 0,
+            "nyt_articles_returned": 0,
+            "nyt_zero_result_queries": 0,
+            "nyt_role": "context_news_api",
+        },
+    )
+    legacy_paid_skips: dict[str, str] = {}
+    external_collected = False
 
     for family in SOURCE_FAMILY_ORDER:
         family_profiles = [
@@ -169,20 +232,65 @@ def schedule_sources(
             failed_profiles.update(
                 row.source_id for row in rows if row.status == "failure"
             )
-        elif family == PAID_NEWS_API:
-            paid_articles, paid_attempts, paid_skipped = _collect_paid_profiles(
-                [profile for profile in profiles if profile.source_family == PAID_NEWS_API],
-                tracked_tickers=tracked_tickers,
-                global_enabled=paid_api_global_enabled,
-                provider_flags=paid_provider_flags,
-                environ=environ,
-                quota_guard_allows=quota_guard_allows,
-                collectors=paid_collectors or {},
-            )
-            articles.extend(paid_articles)
-            attempts.extend(paid_attempts)
-            paid_skips.update(paid_skipped)
+        elif family in {
+            EXTERNAL_MARKET_NEWS_API,
+            CONTEXT_NEWS_API,
+            EXTERNAL_GENERAL_NEWS_API,
+        }:
+            if external_collected:
+                continue
+            external_collected = True
+            if paid_collectors:
+                legacy_articles, legacy_attempts, legacy_skips = _collect_paid_profiles(
+                    [
+                        profile
+                        for profile in profiles
+                        if profile.source_family
+                        in {
+                            EXTERNAL_MARKET_NEWS_API,
+                            CONTEXT_NEWS_API,
+                            EXTERNAL_GENERAL_NEWS_API,
+                        }
+                    ],
+                    tracked_tickers=tracked_tickers,
+                    global_enabled=external_enabled,
+                    provider_flags=provider_flags,
+                    environ=environ,
+                    quota_guard_allows=quota_guard_allows,
+                    collectors=paid_collectors,
+                )
+                articles.extend(legacy_articles)
+                attempts.extend(legacy_attempts)
+                legacy_paid_skips.update(legacy_skips)
+            else:
+                external_profiles = {
+                    profile.source_id: profile
+                    for profile in profiles
+                    if profile.source_family
+                    in {
+                        EXTERNAL_MARKET_NEWS_API,
+                        CONTEXT_NEWS_API,
+                        EXTERNAL_GENERAL_NEWS_API,
+                    }
+                }
+                external_result = collect_external_api_articles(
+                    profiles=external_profiles,
+                    query_plans=query_plans,
+                    tracked_tickers=tracked_tickers,
+                    provider_flags=provider_flags,
+                    global_enabled=external_enabled and quota_guard_allows,
+                    environ=environ,
+                    total_request_budget=max_external_api_requests_total,
+                    provider_request_budgets=provider_budgets,
+                    run_date=run_date,
+                    timeout_seconds=timeout_seconds,
+                    fetch_json=external_fetch_json,
+                )
+                articles.extend(external_result.articles)
+                attempts.extend(_external_attempt_rows(external_result))
         elif family == GOOGLE_NEWS_BACKSTOP:
+            if not family_profiles:
+                continue
             google_budget = _google_backstop_budget(
                 non_google_count=len(_unique_articles(articles)),
                 target_backend_articles=target_backend_articles,
@@ -191,6 +299,18 @@ def schedule_sources(
                 max_google_news_share=max_google_news_share,
             )
             if google_budget <= 0:
+                continue
+            current_coverage = _ticker_coverage_counts(
+                _unique_articles(articles),
+                tracked_tickers,
+                include_google=False,
+            )
+            gap_tickers = tuple(
+                ticker
+                for ticker in tracked_tickers
+                if current_coverage.get(ticker.symbol, 0) < target_articles_per_ticker
+            )
+            if not gap_tickers:
                 continue
             fetched, rows = _collect_rss_profiles(
                 family_profiles,
@@ -202,8 +322,16 @@ def schedule_sources(
                 max_articles_per_ticker=max_articles_per_ticker,
                 max_total_articles=google_budget,
                 rss_collector=rss_collector,
+                google_gap_tickers=gap_tickers,
+                query_plans=query_plans,
             )
-            articles.extend(fetched)
+            articles.extend(
+                _cap_google_by_ticker_gap(
+                    fetched,
+                    current_coverage=current_coverage,
+                    target_articles_per_ticker=target_articles_per_ticker,
+                )
+            )
             attempts.extend(rows)
 
     annotated = annotate_acquisition_scores(
@@ -223,11 +351,16 @@ def schedule_sources(
         failed_profiles=failed_profiles,
         attempts=attempts,
         missing_ir_profiles=missing_ir_profiles,
-        paid_skips=paid_skips,
+        external_diagnostics=external_result.diagnostics,
+        legacy_paid_skips=legacy_paid_skips,
         max_google_news_share=max_google_news_share,
         target_backend_articles=target_backend_articles,
         minimum_backend_articles=minimum_backend_articles,
         max_backend_articles=max_backend_articles,
+        tracked_tickers=tracked_tickers,
+        minimum_articles_per_ticker=minimum_articles_per_ticker,
+        target_articles_per_ticker=target_articles_per_ticker,
+        query_plans=query_plans,
     )
     return SourceScheduleResult(
         articles=tuple(selected),
@@ -246,7 +379,7 @@ def paid_provider_decision(
     collector_available: bool,
 ) -> str | None:
     if not global_enabled:
-        return "global_paid_api_flag_disabled"
+        return "global_external_api_flag_disabled"
     if not provider_enabled:
         return "provider_flag_disabled"
     if profile.api_key_env_var and not environ.get(profile.api_key_env_var):
@@ -286,7 +419,7 @@ def _collect_paid_profiles(
             attempts.append(
                 SourceAcquisitionAttempt(
                     provider=profile.source_id,
-                    source_family=PAID_NEWS_API,
+                    source_family=profile.source_family,
                     source_id=profile.source_id,
                     status="skipped",
                     article_count=0,
@@ -303,7 +436,7 @@ def _collect_paid_profiles(
             attempts.append(
                 SourceAcquisitionAttempt(
                     provider=profile.source_id,
-                    source_family=PAID_NEWS_API,
+                    source_family=profile.source_family,
                     source_id=profile.source_id,
                     status="success",
                     article_count=len(fetched),
@@ -313,7 +446,7 @@ def _collect_paid_profiles(
             attempts.append(
                 SourceAcquisitionAttempt(
                     provider=profile.source_id,
-                    source_family=PAID_NEWS_API,
+                    source_family=profile.source_family,
                     source_id=profile.source_id,
                     status="failure",
                     article_count=0,
@@ -335,6 +468,8 @@ def _collect_rss_profiles(
     max_articles_per_ticker: int,
     max_total_articles: int,
     rss_collector: RssCollector,
+    google_gap_tickers: Sequence[TrackedTicker] = (),
+    query_plans: Sequence[TickerQueryPlan] = (),
 ) -> tuple[list[Article], list[SourceAcquisitionAttempt]]:
     allowed_profiles: list[SourceProfile] = []
     compliance_attempts: list[SourceAcquisitionAttempt] = []
@@ -370,24 +505,55 @@ def _collect_rss_profiles(
                     metadata={"reason": decision.reason},
                 )
             )
-    source_families = tuple(
-        RssSourceFamilyConfig(
-            name=profile.source_id,
-            display_name=profile.publisher_name,
-            category=family,
-            feeds=tuple(
-                RssFeedConfig(
-                    feed_id=f"{profile.source_id}_{index}",
-                    url=url,
-                    publisher_name=profile.publisher_name,
-                )
-                for index, url in enumerate(profile.feed_urls, start=1)
+    source_families: tuple[RssSourceFamilyConfig, ...]
+    if family == GOOGLE_NEWS_BACKSTOP and google_gap_tickers:
+        google_plans = {
+            plan.ticker: plan
+            for plan in provider_query_plans(
+                query_plans,
+                "google_news_rss_search",
+            )
+        }
+        source_families = (
+            RssSourceFamilyConfig(
+                name="google_news_rss_search",
+                display_name="Google News RSS Search",
+                category=GOOGLE_NEWS_BACKSTOP,
+                feeds=tuple(
+                    RssFeedConfig(
+                        feed_id=f"google_news_{ticker.symbol.lower()}",
+                        url=(
+                            "https://news.google.com/rss/search?"
+                            f"q={quote_plus(google_plans[ticker.symbol].query_text)}"
+                            "&hl=en-US&gl=US&ceid=US:en"
+                        ),
+                        publisher_name="Google News",
+                    )
+                    for ticker in google_gap_tickers
+                    if ticker.symbol in google_plans
+                ),
+                ticker_search=False,
             ),
-            ticker_search=profile.source_id == "google_news_rss_search",
         )
-        for profile in allowed_profiles
-        if profile.feed_urls or profile.source_id == "google_news_rss_search"
-    )
+    else:
+        source_families = tuple(
+            RssSourceFamilyConfig(
+                name=profile.source_id,
+                display_name=profile.publisher_name,
+                category=family,
+                feeds=tuple(
+                    RssFeedConfig(
+                        feed_id=f"{profile.source_id}_{index}",
+                        url=url,
+                        publisher_name=profile.publisher_name,
+                    )
+                    for index, url in enumerate(profile.feed_urls, start=1)
+                ),
+                ticker_search=profile.source_id == "google_news_rss_search",
+            )
+            for profile in allowed_profiles
+            if profile.feed_urls or profile.source_id == "google_news_rss_search"
+        )
     if not source_families:
         return [], compliance_attempts
     fetched, rss_attempts = rss_collector(
@@ -470,6 +636,37 @@ def _sec_attempt_rows(
     ]
 
 
+def _external_attempt_rows(
+    result: ExternalApiCollectionResult,
+) -> list[SourceAcquisitionAttempt]:
+    families = {
+        "marketaux": EXTERNAL_MARKET_NEWS_API,
+        "finnhub_news": EXTERNAL_MARKET_NEWS_API,
+        "nyt": CONTEXT_NEWS_API,
+        "gnews": EXTERNAL_GENERAL_NEWS_API,
+        "newsapi": EXTERNAL_GENERAL_NEWS_API,
+    }
+    return [
+        SourceAcquisitionAttempt(
+            provider=attempt.provider,
+            source_family=families.get(attempt.provider, EXTERNAL_MARKET_NEWS_API),
+            source_id=attempt.provider,
+            status=attempt.status,
+            article_count=attempt.article_count,
+            latency_ms=attempt.latency_ms,
+            error_class=attempt.error_class,
+            error_message=attempt.error_message,
+            metadata={
+                "query_id": attempt.query_id,
+                "ticker": attempt.ticker,
+                "request_count": attempt.request_count,
+                "skipped_reason": attempt.skipped_reason,
+            },
+        )
+        for attempt in result.attempts
+    ]
+
+
 def _annotate_profile(article: Article, profile: SourceProfile) -> Article:
     issuer_promotional = profile.source_family == PRESS_RELEASE_WIRE
     return Article(
@@ -521,6 +718,52 @@ def _google_backstop_budget(
         return maximum - non_google_count
     ratio_limit = int(non_google_count * share / (1.0 - share))
     return max(0, min(ratio_limit, maximum - non_google_count))
+
+
+def _ticker_coverage_counts(
+    articles: Sequence[Article],
+    tracked_tickers: Sequence[TrackedTicker],
+    *,
+    include_google: bool,
+) -> dict[str, int]:
+    tracked = {ticker.symbol for ticker in tracked_tickers}
+    counts: Counter[str] = Counter()
+    for article in articles:
+        if (
+            not include_google
+            and article.metadata.get("source_family") == GOOGLE_NEWS_BACKSTOP
+        ):
+            continue
+        for ticker in _article_tickers(article):
+            if ticker in tracked:
+                counts[ticker] += 1
+    return {ticker.symbol: counts[ticker.symbol] for ticker in tracked_tickers}
+
+
+def _cap_google_by_ticker_gap(
+    articles: Sequence[Article],
+    *,
+    current_coverage: Mapping[str, int],
+    target_articles_per_ticker: int,
+) -> list[Article]:
+    accepted: list[Article] = []
+    added: Counter[str] = Counter()
+    target = max(1, target_articles_per_ticker)
+    for article in articles:
+        tickers = _article_tickers(article)
+        if not tickers:
+            continue
+        useful = [
+            ticker
+            for ticker in tickers
+            if current_coverage.get(ticker, 0) + added[ticker] < target
+        ]
+        if not useful:
+            continue
+        accepted.append(article)
+        for ticker in useful:
+            added[ticker] += 1
+    return accepted
 
 
 def _cap_backend_pool(
@@ -594,11 +837,16 @@ def _source_diagnostics(
     failed_profiles: set[str],
     attempts: Sequence[SourceAcquisitionAttempt],
     missing_ir_profiles: Sequence[str],
-    paid_skips: Mapping[str, str],
+    external_diagnostics: Mapping[str, object],
+    legacy_paid_skips: Mapping[str, str],
     max_google_news_share: float,
     target_backend_articles: int,
     minimum_backend_articles: int,
     max_backend_articles: int,
+    tracked_tickers: Sequence[TrackedTicker],
+    minimum_articles_per_ticker: int,
+    target_articles_per_ticker: int,
+    query_plans: Sequence[TickerQueryPlan],
 ) -> dict[str, object]:
     family_counts = Counter(
         str(article.metadata.get("source_family") or "unknown")
@@ -618,11 +866,18 @@ def _source_diagnostics(
         for article in articles
     )
     google_count = family_counts[GOOGLE_NEWS_BACKSTOP]
+    external_families = {
+        EXTERNAL_MARKET_NEWS_API,
+        CONTEXT_NEWS_API,
+        EXTERNAL_GENERAL_NEWS_API,
+    }
     direct_count = (
         family_counts[DIRECT_NEWS_PUBLISHER]
         + family_counts[REGULATORY_OFFICIAL]
         + family_counts[COMPANY_IR]
         + family_counts[PRESS_RELEASE_WIRE]
+        + family_counts[MARKET_DATA_OR_ANALYSIS]
+        + sum(family_counts[family] for family in external_families)
     )
     total = len(articles)
     direct_url_count = sum(
@@ -630,8 +885,33 @@ def _source_diagnostics(
         for article in articles
     )
     google_share = google_count / total if total else 0.0
-    paid_count = family_counts[PAID_NEWS_API]
+    external_count = sum(family_counts[family] for family in external_families)
     diversity = source_diversity_metrics(articles)
+    ticker_coverage = _ticker_coverage_diagnostics(
+        articles,
+        tracked_tickers=tracked_tickers,
+        minimum_articles_per_ticker=minimum_articles_per_ticker,
+        target_articles_per_ticker=target_articles_per_ticker,
+    )
+    external_skips = dict(
+        external_diagnostics.get("external_api_provider_skipped_reasons") or {}
+    )
+    external_skips.update(legacy_paid_skips)
+    external_requests = int(
+        external_diagnostics.get("external_api_total_requests_used") or 0
+    )
+    external_status = (
+        "enabled"
+        if external_count
+        else "enabled_no_results"
+        if external_requests
+        else "skipped"
+        if any(
+            reason != "global_external_api_flag_disabled"
+            for reason in external_skips.values()
+        )
+        else "disabled"
+    )
     return {
         "source_family_counts": dict(sorted(family_counts.items())),
         "articles_by_source_id": dict(sorted(source_counts.items())),
@@ -651,10 +931,30 @@ def _source_diagnostics(
         "company_ir_count": family_counts[COMPANY_IR],
         "press_release_wire_count": family_counts[PRESS_RELEASE_WIRE],
         "direct_publisher_count": family_counts[DIRECT_NEWS_PUBLISHER],
-        "direct_source_article_count": total - google_count - paid_count,
-        "paid_api_count": paid_count,
-        "paid_api_status": "enabled" if paid_count else "disabled_or_skipped",
-        "paid_api_skipped_reasons": dict(sorted(paid_skips.items())),
+        "direct_source_article_count": total - google_count,
+        "direct_or_api_article_count": direct_count,
+        "external_api_count": external_count,
+        "external_api_status": external_status,
+        **external_diagnostics,
+        "external_api_provider_skipped_reasons": dict(sorted(external_skips.items())),
+        # Compatibility aliases for existing report consumers.
+        "paid_api_count": external_count,
+        "paid_api_status": external_status,
+        "paid_api_skipped_reasons": dict(sorted(external_skips.items())),
+        "ticker_coverage_status": ticker_coverage["ticker_coverage_status"],
+        "google_dependence_by_ticker": ticker_coverage[
+            "google_dependence_by_ticker"
+        ],
+        "direct_or_api_coverage_by_ticker": ticker_coverage[
+            "direct_or_api_coverage_by_ticker"
+        ],
+        "google_dominated_tickers": ticker_coverage["google_dominated_tickers"],
+        "minimum_articles_per_ticker": minimum_articles_per_ticker,
+        "target_articles_per_ticker": target_articles_per_ticker,
+        "ticker_query_plan_count": len(query_plans),
+        "ticker_query_plan_counts_by_provider": dict(
+            sorted(Counter(plan.provider_target for plan in query_plans).items())
+        ),
         "missing_company_ir_profiles": list(missing_ir_profiles),
         "source_profiles_loaded": len(profiles),
         "source_profiles_enabled": len(enabled_profiles),
@@ -678,6 +978,64 @@ def _source_diagnostics(
         "success_count": sum(row.status == "success" for row in attempts),
         "failure_count": sum(row.status == "failure" for row in attempts),
         "attempts": [row.as_dict() for row in attempts],
+    }
+
+
+def _ticker_coverage_diagnostics(
+    articles: Sequence[Article],
+    *,
+    tracked_tickers: Sequence[TrackedTicker],
+    minimum_articles_per_ticker: int,
+    target_articles_per_ticker: int,
+) -> dict[str, object]:
+    minimum = max(1, minimum_articles_per_ticker)
+    target = max(minimum, target_articles_per_ticker)
+    direct_counts: Counter[str] = Counter()
+    google_counts: Counter[str] = Counter()
+    for article in articles:
+        destination = (
+            google_counts
+            if article.metadata.get("source_family") == GOOGLE_NEWS_BACKSTOP
+            else direct_counts
+        )
+        for ticker in _article_tickers(article):
+            destination[ticker] += 1
+
+    statuses: dict[str, dict[str, object]] = {}
+    dependence: dict[str, float] = {}
+    direct_coverage: dict[str, int] = {}
+    dominated: list[str] = []
+    for ticker in tracked_tickers:
+        symbol = ticker.symbol
+        direct = direct_counts[symbol]
+        google = google_counts[symbol]
+        total = direct + google
+        google_share = google / total if total else 0.0
+        if direct >= target:
+            status = "strong_direct"
+        elif direct >= minimum:
+            status = "moderate_mixed"
+        elif total >= minimum and google > direct:
+            status = "google_dominated"
+        else:
+            status = "low_coverage"
+        if status == "google_dominated":
+            dominated.append(symbol)
+        statuses[symbol] = {
+            "coverage_status": status,
+            "article_count": total,
+            "direct_or_api_article_count": direct,
+            "google_article_count": google,
+            "minimum_articles_per_ticker": minimum,
+            "target_articles_per_ticker": target,
+        }
+        dependence[symbol] = round(google_share, 4)
+        direct_coverage[symbol] = direct
+    return {
+        "ticker_coverage_status": statuses,
+        "google_dependence_by_ticker": dependence,
+        "direct_or_api_coverage_by_ticker": direct_coverage,
+        "google_dominated_tickers": dominated,
     }
 
 

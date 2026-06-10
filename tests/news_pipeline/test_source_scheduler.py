@@ -7,6 +7,7 @@ from news_pipeline.sources.sec_edgar import SecCollectionAttempt
 from news_pipeline.sources.source_registry import (
     COMPANY_IR,
     DIRECT_NEWS_PUBLISHER,
+    EXTERNAL_MARKET_NEWS_API,
     GOOGLE_NEWS_BACKSTOP,
     MARKET_DATA_OR_ANALYSIS,
     PAID_NEWS_API,
@@ -318,7 +319,7 @@ class SourceSchedulerTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(
             disabled.diagnostics["paid_api_skipped_reasons"]["marketaux"],
-            "global_paid_api_flag_disabled",
+            "global_external_api_flag_disabled",
         )
 
         missing_key = _schedule_paid(
@@ -359,6 +360,81 @@ class SourceSchedulerTests(unittest.TestCase):
             source_diversity_metrics(mixed)["source_diversity_score"],
             source_diversity_metrics(one_source)["source_diversity_score"],
         )
+
+    def test_marketaux_runs_before_google_and_coverage_is_reported(self):
+        profiles = (
+            _profile("direct", DIRECT_NEWS_PUBLISHER),
+            SourceProfile(
+                source_id="marketaux",
+                source_family=EXTERNAL_MARKET_NEWS_API,
+                publisher_name="Marketaux",
+                domain="marketaux.com",
+                source_quality_tier=2,
+                enabled_by_default=False,
+                api_key_env_var="MARKETAUX_API_KEY",
+                discovery_methods=("api",),
+                source_priority=70,
+                extraction_priority=70,
+            ),
+            _profile("google_news_rss_search", GOOGLE_NEWS_BACKSTOP),
+        )
+
+        def fetch_json(endpoint, params, headers, timeout):
+            return {
+                "data": [
+                    {
+                        "uuid": "marketaux-nvda",
+                        "title": "NVIDIA shares rise on data center demand",
+                        "description": "NVDA stock gained after a revenue update.",
+                        "url": "https://publisher.example.com/nvda",
+                        "published_at": "2026-06-09T12:00:00Z",
+                        "source": "Example Publisher",
+                        "entities": [{"symbol": "NVDA"}],
+                    }
+                ]
+            }
+
+        result = schedule_sources(
+            profiles=profiles,
+            tracked_tickers=(NVDA,),
+            company_ir_profiles={},
+            run_date="2026-06-09",
+            user_agent="test",
+            timeout_seconds=1,
+            retries=0,
+            target_backend_articles=5,
+            minimum_backend_articles=3,
+            max_backend_articles=10,
+            max_articles_per_source=10,
+            max_articles_per_ticker=10,
+            max_google_news_share=0.75,
+            include_press_release_feeds=True,
+            include_sec_feeds=False,
+            external_api_global_enabled=True,
+            external_provider_flags={"marketaux": True},
+            max_external_api_requests_total=1,
+            external_provider_request_budgets={"marketaux": 1},
+            minimum_articles_per_ticker=2,
+            target_articles_per_ticker=3,
+            environ={"MARKETAUX_API_KEY": "test-key"},
+            rss_collector=_fake_rss_collector,
+            external_fetch_json=fetch_json,
+        )
+
+        families = [attempt.source_family for attempt in result.attempts]
+        self.assertLess(
+            families.index(EXTERNAL_MARKET_NEWS_API),
+            families.index(GOOGLE_NEWS_BACKSTOP),
+        )
+        self.assertEqual(
+            result.diagnostics["external_api_requests_used_by_provider"],
+            {"marketaux": 1},
+        )
+        self.assertIn(
+            result.diagnostics["ticker_coverage_status"]["NVDA"]["coverage_status"],
+            {"moderate_mixed", "strong_direct"},
+        )
+        self.assertIn("google_dependence_by_ticker", result.diagnostics)
 
 
 def _fake_rss_collector(**kwargs):

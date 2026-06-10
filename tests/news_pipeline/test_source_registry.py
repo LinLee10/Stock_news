@@ -36,8 +36,9 @@ class SourceRegistryTests(unittest.TestCase):
                 "stockstory",
                 "marketaux",
                 "finnhub_news",
-                "alpha_vantage",
+                "nyt",
                 "gnews",
+                "newsapi",
                 "google_news_rss_search",
             }.issubset(source_ids)
         )

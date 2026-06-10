@@ -172,6 +172,12 @@ def _source_family_factor(article: Article) -> float:
         return 0.65
     if family == "google_news_backstop":
         return 0.75
+    if family == "context_news_api":
+        return 0.55 if article.metadata.get("external_context_only") else 0.85
+    if family == "external_general_news_api":
+        return 0.75
+    if family == "external_market_news_api":
+        return 0.95
     if family in {"regulatory_official", "company_ir"}:
         return 1.15
     return 1.0

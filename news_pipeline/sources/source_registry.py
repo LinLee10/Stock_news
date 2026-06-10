@@ -11,7 +11,11 @@ COMPANY_IR = "company_ir"
 PRESS_RELEASE_WIRE = "press_release_wire"
 DIRECT_NEWS_PUBLISHER = "direct_news_publisher"
 MARKET_DATA_OR_ANALYSIS = "market_data_or_analysis"
-PAID_NEWS_API = "paid_news_api"
+EXTERNAL_MARKET_NEWS_API = "external_market_news_api"
+CONTEXT_NEWS_API = "context_news_api"
+EXTERNAL_GENERAL_NEWS_API = "external_general_news_api"
+# Backward-compatible import alias. New code and diagnostics use external API terms.
+PAID_NEWS_API = EXTERNAL_MARKET_NEWS_API
 GOOGLE_NEWS_BACKSTOP = "google_news_backstop"
 
 SOURCE_FAMILY_ORDER = (
@@ -20,7 +24,9 @@ SOURCE_FAMILY_ORDER = (
     PRESS_RELEASE_WIRE,
     DIRECT_NEWS_PUBLISHER,
     MARKET_DATA_OR_ANALYSIS,
-    PAID_NEWS_API,
+    EXTERNAL_MARKET_NEWS_API,
+    CONTEXT_NEWS_API,
+    EXTERNAL_GENERAL_NEWS_API,
     GOOGLE_NEWS_BACKSTOP,
 )
 
@@ -339,55 +345,73 @@ SOURCE_PROFILES: tuple[SourceProfile, ...] = (
     ),
     SourceProfile(
         source_id="marketaux",
-        source_family=PAID_NEWS_API,
+        source_family=EXTERNAL_MARKET_NEWS_API,
         publisher_name="Marketaux",
         domain="marketaux.com",
         source_quality_tier=2,
         enabled_by_default=False,
-        paid_required=True,
+        paid_required=False,
         api_key_env_var="MARKETAUX_API_KEY",
         discovery_methods=("api",),
         source_priority=70,
         extraction_priority=70,
+        notes="Free-tier market news API; disabled by default and quota limited.",
     ),
     SourceProfile(
         source_id="finnhub_news",
-        source_family=PAID_NEWS_API,
+        source_family=EXTERNAL_MARKET_NEWS_API,
         publisher_name="Finnhub",
         domain="finnhub.io",
         source_quality_tier=2,
         enabled_by_default=False,
-        paid_required=True,
-        api_key_env_var="FINNHUB_API_KEY",
+        paid_required=False,
+        api_key_env_var="FINNHUB_KEY",
         discovery_methods=("api",),
         source_priority=70,
         extraction_priority=70,
+        notes="Free-tier company news endpoint only; trading endpoints are not used.",
     ),
     SourceProfile(
-        source_id="alpha_vantage",
-        source_family=PAID_NEWS_API,
-        publisher_name="Alpha Vantage",
-        domain="alphavantage.co",
-        source_quality_tier=2,
+        source_id="nyt",
+        source_family=CONTEXT_NEWS_API,
+        publisher_name="The New York Times",
+        domain="nytimes.com",
+        source_quality_tier=1,
         enabled_by_default=False,
-        paid_required=True,
-        api_key_env_var="ALPHA_VANTAGE_KEY",
+        paid_required=False,
+        api_key_env_var="NYT_API_KEY",
         discovery_methods=("api",),
-        source_priority=68,
+        source_priority=72,
         extraction_priority=65,
+        notes="Free-tier Article Search context; not assumed to contain full text.",
     ),
     SourceProfile(
         source_id="gnews",
-        source_family=PAID_NEWS_API,
+        source_family=EXTERNAL_GENERAL_NEWS_API,
         publisher_name="GNews",
         domain="gnews.io",
         source_quality_tier=2,
         enabled_by_default=False,
-        paid_required=True,
-        api_key_env_var="GNEWS_API_KEY",
+        paid_required=False,
+        api_key_env_var="GNEWS_KEY",
         discovery_methods=("api",),
         source_priority=62,
         extraction_priority=60,
+        notes="Free-tier general news backup; disabled by default and quota limited.",
+    ),
+    SourceProfile(
+        source_id="newsapi",
+        source_family=EXTERNAL_GENERAL_NEWS_API,
+        publisher_name="NewsAPI",
+        domain="newsapi.org",
+        source_quality_tier=2,
+        enabled_by_default=False,
+        paid_required=False,
+        api_key_env_var="NEWSAPI_KEY",
+        discovery_methods=("api",),
+        source_priority=58,
+        extraction_priority=55,
+        notes="Free-tier broad news backup; licensing and quota diagnostics apply.",
     ),
     SourceProfile(
         source_id="google_news_rss_search",

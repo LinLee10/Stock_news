@@ -374,6 +374,15 @@ def build_daily_report(
             },
         ),
         _write_mapping_csv(
+            output_dir / "external_api_skipped_reasons.csv",
+            "provider",
+            "reason",
+            report_input.source_coverage_diagnostics.get(
+                "external_api_provider_skipped_reasons",
+                {},
+            ),
+        ),
+        _write_mapping_csv(
             output_dir / "paid_api_skipped_reasons.csv",
             "provider",
             "reason",
@@ -668,7 +677,7 @@ def _report_metadata_html(
         f"    <tr><td>Current local date</td><td>{escape(date.today().isoformat())}</td></tr>",
         f"    <tr><td>Data source</td><td>{escape(report_input.data_source_label)}</td></tr>",
         "    <tr><td>Delivery mode</td><td>local report only; no email sent</td></tr>",
-        f"    <tr><td>Paid API status</td><td>{escape(str(report_input.source_coverage_diagnostics.get('paid_api_status', 'disabled')))}</td></tr>",
+        f"    <tr><td>External free-tier API status</td><td>{escape(str(report_input.source_coverage_diagnostics.get('external_api_status', 'disabled')))}</td></tr>",
         f"    <tr><td>Report summary</td><td>{escape(_plain_english_summary(report_input, top_10))}</td></tr>",
     ]
     if warnings:
@@ -798,35 +807,93 @@ def _top_briefing_html(
 
 
 def _source_coverage_line_html(diagnostics: Mapping[str, object]) -> str:
-    paid = diagnostics.get("paid_api_count", 0)
-    paid_label = str(paid) if paid else "disabled"
+    external = diagnostics.get("external_api_count", 0)
+    external_label = (
+        str(external)
+        if external
+        else str(diagnostics.get("external_api_status") or "disabled")
+    )
+    dominated = diagnostics.get("google_dominated_tickers") or ()
     return (
         "  <p class=\"muted\"><strong>Source Coverage:</strong> "
-        f"Official filings: {int(diagnostics.get('official_source_count', 0))} &middot; "
-        f"Press releases: {int(diagnostics.get('press_release_wire_count', 0))} &middot; "
+        f"Official or SEC: {int(diagnostics.get('official_source_count', 0))} &middot; "
         f"Direct publishers: {int(diagnostics.get('direct_publisher_count', 0))} &middot; "
+        f"Press wires: {int(diagnostics.get('press_release_wire_count', 0))} &middot; "
+        f"External free tier APIs: {escape(external_label)} &middot; "
         f"Google backstop: {int(diagnostics.get('google_news_backstop_count', 0))} &middot; "
-        f"Paid APIs: {escape(paid_label)}</p>"
+        f"Google dominated tickers: {len(dominated)}</p>"
     )
 
 
 def _source_acquisition_diagnostics_html(
     diagnostics: Mapping[str, object],
 ) -> str:
+    raw_external = sum(
+        int(value)
+        for value in (
+            diagnostics.get("raw_external_articles_by_provider") or {}
+        ).values()
+    )
+    post_dedup_external = sum(
+        int(value)
+        for value in (
+            diagnostics.get("post_dedup_external_articles_by_provider") or {}
+        ).values()
+    )
+    sentiment_external = sum(
+        int(value)
+        for value in (
+            diagnostics.get("articles_used_for_sentiment_by_provider") or {}
+        ).values()
+    )
     return "\n".join(
         [
             "  <h2>Source Acquisition Summary</h2>",
             "  <table>",
-            "    <tr><th>Official</th><th>Company IR</th><th>Press Wires</th><th>Direct Publishers</th><th>Google Backstop</th><th>Google Share</th><th>Diversity</th><th>Balance</th></tr>",
+            "    <tr><th>Official</th><th>Company IR</th><th>Press Wires</th><th>Direct Publishers</th><th>External APIs</th><th>Google Backstop</th><th>Google Share</th><th>Google-Dominated Tickers</th><th>Diversity</th><th>Balance</th></tr>",
             "    <tr>"
             f"<td class=\"num\">{int(diagnostics.get('official_source_count', 0))}</td>"
             f"<td class=\"num\">{int(diagnostics.get('company_ir_count', 0))}</td>"
             f"<td class=\"num\">{int(diagnostics.get('press_release_wire_count', 0))}</td>"
             f"<td class=\"num\">{int(diagnostics.get('direct_publisher_count', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('external_api_count', 0))}</td>"
             f"<td class=\"num\">{int(diagnostics.get('google_news_backstop_count', 0))}</td>"
             f"<td class=\"num\">{float(diagnostics.get('google_news_share', 0.0)):.1%}</td>"
+            f"<td class=\"num\">{len(diagnostics.get('google_dominated_tickers') or ())}</td>"
             f"<td class=\"num\">{float(diagnostics.get('source_diversity_score', 0.0)):.1f}</td>"
             f"<td class=\"num\">{float(diagnostics.get('source_balance_score', 0.0)):.1f}</td>"
+            "</tr>",
+            "  </table>",
+            "  <h3>External API Quality Diagnostics</h3>",
+            "  <table>",
+            "    <tr><th>Raw External</th><th>Post-Dedup External</th><th>Used for Sentiment</th><th>Top Provider Raw</th><th>Top Provider Post-Dedup</th><th>Provider Warning</th><th>Top Ticker Raw</th><th>Top Ticker Post-Dedup</th><th>Ticker Warning</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{raw_external}</td>"
+            f"<td class=\"num\">{post_dedup_external}</td>"
+            f"<td class=\"num\">{sentiment_external}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('top_provider_share_raw', 0.0)):.1%}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('top_provider_share_post_dedup', 0.0)):.1%}</td>"
+            f"<td>{escape(str(bool(diagnostics.get('provider_concentration_warning'))).lower())}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('top_ticker_share_raw', 0.0)):.1%}</td>"
+            f"<td class=\"num\">{float(diagnostics.get('top_ticker_share_post_dedup', 0.0)):.1%}</td>"
+            f"<td>{escape(str(bool(diagnostics.get('ticker_concentration_warning'))).lower())}</td>"
+            "</tr>",
+            "  </table>",
+            "  <table>",
+            "    <tr><th>Provider</th><th>Requests</th><th>Articles</th><th>Status</th><th>Detail</th></tr>",
+            "    <tr>"
+            "<td>GNews</td>"
+            f"<td class=\"num\">{int(diagnostics.get('gnews_requests_attempted', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('gnews_articles_returned', 0))}</td>"
+            f"<td>{escape(str(diagnostics.get('gnews_status_code') or diagnostics.get('gnews_skipped_reason') or 'no_result'))}</td>"
+            f"<td>{escape(str(diagnostics.get('gnews_error_reason') or 'none'))}</td>"
+            "</tr>",
+            "    <tr>"
+            "<td>NYT context</td>"
+            f"<td class=\"num\">{int(diagnostics.get('nyt_requests_attempted', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('nyt_articles_returned', 0))}</td>"
+            f"<td>{escape(str(diagnostics.get('nyt_role') or 'context_news_api'))}</td>"
+            f"<td>zero-result queries: {int(diagnostics.get('nyt_zero_result_queries', 0))}</td>"
             "</tr>",
             "  </table>",
         ]

@@ -108,7 +108,7 @@ def _report_metadata(report: DailyReportContract) -> str:
         f"      <tr><td>Data source</td><td>{escape(report.data_source_label)}</td></tr>",
         "      <tr><td>Delivery mode</td><td><strong>Preview only:</strong> no live email provider was contacted.</td></tr>",
         "      <tr><td>SMTP send status</td><td>not sent</td></tr>",
-        f"      <tr><td>Paid API status</td><td>{escape(str(report.source_coverage_diagnostics.get('paid_api_status', 'disabled')))}</td></tr>",
+        f"      <tr><td>External free-tier API status</td><td>{escape(str(report.source_coverage_diagnostics.get('external_api_status', 'disabled')))}</td></tr>",
         f"      <tr><td>Report summary</td><td>{escape(report.daily_summary)}</td></tr>",
     ]
     if report.report_warnings:
@@ -147,15 +147,21 @@ def _top_briefing(report: DailyReportContract) -> str:
 
 def _source_coverage_line(report: DailyReportContract) -> str:
     diagnostics = report.source_coverage_diagnostics
-    paid = diagnostics.get("paid_api_count", 0)
-    paid_label = str(paid) if paid else "disabled"
+    external = diagnostics.get("external_api_count", 0)
+    external_label = (
+        str(external)
+        if external
+        else str(diagnostics.get("external_api_status") or "disabled")
+    )
+    dominated = diagnostics.get("google_dominated_tickers") or ()
     return (
         "    <p class=\"muted\"><strong>Source Coverage:</strong> "
-        f"Official filings: {int(diagnostics.get('official_source_count', 0))} &middot; "
-        f"Press releases: {int(diagnostics.get('press_release_wire_count', 0))} &middot; "
+        f"Official or SEC: {int(diagnostics.get('official_source_count', 0))} &middot; "
         f"Direct publishers: {int(diagnostics.get('direct_publisher_count', 0))} &middot; "
+        f"Press wires: {int(diagnostics.get('press_release_wire_count', 0))} &middot; "
+        f"External free tier APIs: {escape(external_label)} &middot; "
         f"Google backstop: {int(diagnostics.get('google_news_backstop_count', 0))} &middot; "
-        f"Paid APIs: {escape(paid_label)}</p>"
+        f"Google dominated tickers: {len(dominated)}</p>"
     )
 
 

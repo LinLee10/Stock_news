@@ -29,10 +29,11 @@ class ProviderValidationTests(unittest.TestCase):
                 "cnbc_rss",
                 "marketwatch_rss",
                 "sec_edgar",
-                "alpha_vantage",
                 "marketaux",
+                "nyt",
                 "gnews",
                 "finnhub_news",
+                "newsapi",
                 "resend",
             },
         )
@@ -44,8 +45,8 @@ class ProviderValidationTests(unittest.TestCase):
         self.assertEqual(result.last_status, "dry_run_ok")
 
     def test_keyed_provider_records_presence_only(self):
-        secret = "secret-alpha-value"
-        result = validate_provider("alpha_vantage", environ={"ALPHA_VANTAGE_KEY": secret})
+        secret = "secret-nyt-value"
+        result = validate_provider("nyt", environ={"NYT_API_KEY": secret})
         safe = result.as_safe_dict()
 
         self.assertEqual(result.key_state, "present")
@@ -66,7 +67,7 @@ class ProviderValidationTests(unittest.TestCase):
     def test_fake_checker_supports_quota_status(self):
         result = validate_provider(
             get_provider_config("gnews"),
-            environ={"GNEWS_API_KEY": "secret-gnews-value"},
+            environ={"GNEWS_KEY": "secret-gnews-value"},
             checker=FakeChecker(),
         )
 
