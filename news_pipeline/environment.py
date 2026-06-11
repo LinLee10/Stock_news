@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 
 EXPECTED_ENV_VARIABLES = (
+    "ALPHA_VANTAGE_KEY",
     "NYT_API_KEY",
     "MARKETAUX_API_KEY",
     "GNEWS_KEY",

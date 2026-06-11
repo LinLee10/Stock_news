@@ -65,6 +65,14 @@ PROVIDER_REGISTRY: dict[str, ProviderConfig] = {
         quota_truth_source="provider_response_or_plan",
         key_env_var="MARKETAUX_API_KEY",
     ),
+    "alpha_vantage_news": ProviderConfig(
+        name="alpha_vantage_news",
+        provider_type="external_free_tier_api",
+        limit_type="daily_quota",
+        reset_window="daily",
+        quota_truth_source="provider_response_or_plan",
+        key_env_var="ALPHA_VANTAGE_KEY",
+    ),
     "nyt": ProviderConfig(
         name="nyt",
         provider_type="external_free_tier_api",

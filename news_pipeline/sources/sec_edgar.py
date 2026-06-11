@@ -17,19 +17,16 @@ from .source_registry import REGULATORY_OFFICIAL
 
 SEC_TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
-MATERIAL_FORMS = {
-    "8-K",
-    "6-K",
-    "10-Q",
-    "10-K",
-    "DEF 14A",
-    "SC 13D",
-    "SC 13G",
-    "S-1",
-    "424B2",
-    "424B3",
-    "424B4",
-    "424B5",
+SEC_EVENT_TYPES = {
+    "8-K": ("material_event", 100, "material current report"),
+    "10-Q": ("quarterly_report", 92, "quarterly financial report"),
+    "10-K": ("annual_report", 96, "annual financial report"),
+    "6-K": ("foreign_issuer_report", 90, "foreign issuer report"),
+    "SC 13D": ("ownership_event", 88, "beneficial ownership event"),
+    "SC 13G": ("ownership_event", 84, "beneficial ownership disclosure"),
+    "DEF 14A": ("proxy_event", 78, "definitive proxy statement"),
+    "S-1": ("registration_event", 90, "securities registration statement"),
+    "424B": ("offering_or_prospectus", 94, "offering or prospectus update"),
 }
 
 
@@ -152,7 +149,8 @@ def _normalize_recent_filings(
     for index in range(row_count):
         form = str(forms[index] or "").upper()
         filed = str(filing_dates[index] or "")
-        if form not in MATERIAL_FORMS:
+        event = classify_sec_form(form)
+        if event is None:
             continue
         try:
             filing_date = date.fromisoformat(filed)
@@ -174,7 +172,12 @@ def _normalize_recent_filings(
             if index < len(descriptions)
             else ""
         )
+        event_type, priority, summary_label = event
         title = f"{ticker.company_name} files {form} with the SEC"
+        event_summary = (
+            f"{ticker.company_name} filed a {summary_label} ({form})"
+            f"{': ' + description if description else '.'}"
+        )
         articles.append(
             Article(
                 canonical_url=url,
@@ -193,6 +196,14 @@ def _normalize_recent_filings(
                     "company": ticker.company_name,
                     "event_type": "filing_or_sec_event",
                     "filing_form_type": form,
+                    "filing_event_type": event_type,
+                    "official_event_priority": priority,
+                    "sec_event_summary": event_summary,
+                    "sec_event_basis": (
+                        "form_type_and_primary_document_description"
+                        if description
+                        else "form_type"
+                    ),
                     "accession_number": accession,
                     "ticker_match_confidence": 1.0,
                     "ticker_match_reason": "official_filing_for_configured_ticker",
@@ -204,6 +215,26 @@ def _normalize_recent_filings(
         if len(articles) >= max(1, max_filings):
             break
     return articles
+
+
+def classify_sec_form(
+    form: str,
+) -> tuple[str, int, str] | None:
+    normalized = " ".join(str(form or "").upper().split())
+    base = normalized.removesuffix("/A")
+    aliases = {
+        "13D": "SC 13D",
+        "13G": "SC 13G",
+        "SC13D": "SC 13D",
+        "SC13G": "SC 13G",
+        "DEF14A": "DEF 14A",
+    }
+    base = aliases.get(base, base)
+    if base.startswith("424B"):
+        return SEC_EVENT_TYPES["424B"]
+    if base in SEC_EVENT_TYPES:
+        return SEC_EVENT_TYPES[base]
+    return None
 
 
 def _fetch_json(url: str, user_agent: str, timeout_seconds: float) -> Mapping[str, object]:

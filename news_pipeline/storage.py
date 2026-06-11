@@ -170,6 +170,30 @@ class SQLiteStore:
                 tickers_json TEXT NOT NULL DEFAULT '[]',
                 UNIQUE(run_id, article_id)
             );
+
+            CREATE TABLE IF NOT EXISTS event_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id TEXT NOT NULL,
+                canonical_url TEXT NOT NULL,
+                published_at TEXT,
+                ticker TEXT NOT NULL,
+                company TEXT NOT NULL,
+                source_provider TEXT NOT NULL,
+                source_family TEXT NOT NULL,
+                article_type TEXT NOT NULL,
+                cluster_id TEXT,
+                ticker_match_confidence REAL NOT NULL,
+                extraction_basis TEXT NOT NULL,
+                extraction_quality_grade TEXT NOT NULL,
+                internal_sentiment REAL NOT NULL,
+                external_sentiment_provider TEXT,
+                external_sentiment REAL,
+                event_type TEXT NOT NULL,
+                event_summary TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                run_date TEXT NOT NULL,
+                UNIQUE(run_id, article_id, ticker)
+            );
             """
         )
         self._ensure_column("runs", "run_date", "TEXT")
@@ -203,6 +227,7 @@ class SQLiteStore:
             (run_id, legacy_metadata_pattern),
         )
         self.connection.execute("DELETE FROM article_extractions WHERE run_id = ?", (run_id,))
+        self.connection.execute("DELETE FROM event_memory WHERE run_id = ?", (run_id,))
         self.connection.execute("DELETE FROM dedupe_clusters WHERE run_id = ?", (run_id,))
         self.connection.execute("DELETE FROM sentiment_results WHERE run_id = ?", (run_id,))
         self.connection.execute("DELETE FROM ticker_mentions WHERE run_id = ?", (run_id,))
@@ -533,6 +558,38 @@ class SQLiteStore:
         self.connection.commit()
         return int(cursor.lastrowid)
 
+    def record_event_memory(self, record: Mapping[str, object]) -> int:
+        fields = (
+            "article_id",
+            "canonical_url",
+            "published_at",
+            "ticker",
+            "company",
+            "source_provider",
+            "source_family",
+            "article_type",
+            "cluster_id",
+            "ticker_match_confidence",
+            "extraction_basis",
+            "extraction_quality_grade",
+            "internal_sentiment",
+            "external_sentiment_provider",
+            "external_sentiment",
+            "event_type",
+            "event_summary",
+            "run_id",
+            "run_date",
+        )
+        cursor = self.connection.execute(
+            f"""
+            INSERT OR REPLACE INTO event_memory ({", ".join(fields)})
+            VALUES ({", ".join("?" for _field in fields)})
+            """,
+            tuple(record.get(field) for field in fields),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid)
+
     def list_provider_usage(self) -> list[dict[str, object]]:
         rows = self.connection.execute(
             "SELECT * FROM provider_usage ORDER BY id ASC"
@@ -600,6 +657,13 @@ class SQLiteStore:
     def list_dedupe_clusters(self, run_id: str) -> list[dict[str, object]]:
         rows = self.connection.execute(
             "SELECT * FROM dedupe_clusters WHERE run_id = ? ORDER BY cluster_index ASC",
+            (run_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_event_memory(self, run_id: str) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            "SELECT * FROM event_memory WHERE run_id = ? ORDER BY id ASC",
             (run_id,),
         ).fetchall()
         return [dict(row) for row in rows]

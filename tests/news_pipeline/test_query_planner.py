@@ -44,7 +44,12 @@ class QueryPlannerTests(unittest.TestCase):
         tickers = (
             TrackedTicker("ASML", "ASML", ("ASML Holding",), "portfolio"),
             TrackedTicker("CORZ", "Core Scientific", (), "watchlist"),
+            TrackedTicker("CRWV", "CoreWeave", (), "watchlist"),
             TrackedTicker("META", "Meta", ("Meta Platforms",), "watchlist"),
+            TrackedTicker("MRVL", "Marvell", ("Marvell Technology",), "watchlist"),
+            TrackedTicker("MU", "Micron", ("Micron Technology",), "portfolio"),
+            TrackedTicker("PANW", "Palo Alto Networks", (), "watchlist"),
+            TrackedTicker("PLTR", "Palantir", ("Palantir Technologies",), "portfolio"),
             TrackedTicker("VRT", "Vertiv", ("Vertiv Holdings",), "watchlist"),
         )
 
@@ -56,7 +61,12 @@ class QueryPlannerTests(unittest.TestCase):
         expected_names = {
             "ASML": "ASML Holding",
             "CORZ": "Core Scientific",
+            "CRWV": "CoreWeave",
             "META": "Meta Platforms",
+            "MRVL": "Marvell Technology",
+            "MU": "Micron Technology",
+            "PANW": "Palo Alto Networks",
+            "PLTR": "Palantir Technologies",
             "VRT": "Vertiv Holdings",
         }
         for ticker, company in expected_names.items():
@@ -64,6 +74,7 @@ class QueryPlannerTests(unittest.TestCase):
             self.assertTrue(
                 any(f'"{company}"' in plan.query_text for plan in ticker_plans)
             )
+            self.assertTrue(all(plan.company == company for plan in ticker_plans))
 
     def test_nyt_queries_are_company_context_queries(self):
         ticker = TrackedTicker(
@@ -91,6 +102,26 @@ class QueryPlannerTests(unittest.TestCase):
             "cybersecurity",
         ):
             self.assertIn(term, combined)
+
+    def test_nyt_routing_prioritizes_likely_context_coverage(self):
+        tickers = (
+            TrackedTicker("ASML", "ASML", ("ASML Holding",), "portfolio"),
+            TrackedTicker("META", "Meta", ("Meta Platforms",), "watchlist"),
+            TrackedTicker("MU", "Micron", ("Micron Technology",), "portfolio"),
+            TrackedTicker("NVDA", "NVIDIA", ("Nvidia",), "portfolio"),
+            TrackedTicker("AMD", "Advanced Micro Devices", ("AMD",), "watchlist"),
+        )
+
+        plans = plan_ticker_queries(tickers, provider_targets=("nyt",))
+        company_plans = sorted(
+            (plan for plan in plans if plan.query_type == "company_context"),
+            key=lambda plan: -plan.priority,
+        )
+
+        self.assertEqual(
+            [plan.ticker for plan in company_plans[:4]],
+            ["META", "MU", "NVDA", "AMD"],
+        )
 
 
 if __name__ == "__main__":

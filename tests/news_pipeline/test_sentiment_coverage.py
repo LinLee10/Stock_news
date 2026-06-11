@@ -93,15 +93,59 @@ class SentimentCoverageTests(unittest.TestCase):
 
         self.assertEqual(coverage["NVDA"].sentiment_coverage_grade, "strong")
 
+    def test_external_balancing_factors_reduce_sentiment_weight(self):
+        baseline = _article(
+            "https://example.com/nvidia-baseline",
+            "NVIDIA reports strong AI demand",
+            snippet="NVIDIA reported strong growth and record demand.",
+        )
+        downweighted = _article(
+            "https://example.com/nvidia-downweighted",
+            "NVIDIA reports strong AI demand update",
+            snippet="NVIDIA reported strong growth and record demand.",
+            metadata={
+                "dominant_provider_downweight": 0.7,
+                "dominant_ticker_downweight": 0.75,
+                "source_diversity_bonus": 1.0,
+                "direct_api_bonus": 1.0,
+                "official_source_bonus": 1.0,
+                "google_backstop_downweight": 1.0,
+            },
+        )
 
-def _article(url, title, *, full_text=None, snippet=None, source="Yahoo Finance"):
+        inputs, _coverage = build_weighted_sentiment_coverage(
+            articles=(baseline, downweighted),
+            clusters=cluster_articles((baseline, downweighted)),
+            run_date="2026-06-08",
+        )
+        by_url = {item.canonical_url: item for item in inputs if item.ticker == "NVDA"}
+
+        self.assertLess(
+            by_url[downweighted.canonical_url].sentiment_weight,
+            by_url[baseline.canonical_url].sentiment_weight,
+        )
+        self.assertIn(
+            "dominant_provider_downweight=0.70",
+            by_url[downweighted.canonical_url].sentiment_weight_reasons,
+        )
+
+
+def _article(
+    url,
+    title,
+    *,
+    full_text=None,
+    snippet=None,
+    source="Yahoo Finance",
+    metadata=None,
+):
     return Article(
         canonical_url=url,
         title=title,
         published_at="2026-06-08T08:00:00+00:00",
         full_text=full_text,
         snippet=snippet,
-        metadata={"source_name": source},
+        metadata={"source_name": source, **dict(metadata or {})},
     )
 
 

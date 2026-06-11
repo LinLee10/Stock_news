@@ -120,6 +120,7 @@ def schedule_sources(
     provider_budgets = dict(
         external_provider_request_budgets
         or {
+            "alpha_vantage_news": 5,
             "marketaux": 10,
             "nyt": 10,
             "gnews": 5,
@@ -158,17 +159,32 @@ def schedule_sources(
             "external_api_total_requests_used": 0,
             "external_api_total_request_budget": max_external_api_requests_total,
             "quota_budget_remaining_estimate": max_external_api_requests_total,
+            "alpha_vantage_news_requests_used": 0,
+            "alpha_vantage_news_articles_returned": 0,
+            "alpha_vantage_news_status_code": None,
+            "alpha_vantage_news_error_reason": None,
+            "alpha_vantage_news_skipped_reason": (
+                "global_external_api_flag_disabled"
+            ),
+            "alpha_vantage_news_effective_endpoint_without_key": None,
+            "alpha_vantage_news_effective_params_without_key": {},
             "gnews_status_code": None,
             "gnews_error_reason": None,
             "gnews_requests_attempted": 0,
             "gnews_articles_returned": 0,
             "gnews_skipped_reason": "global_external_api_flag_disabled",
+            "gnews_rate_limited_count": 0,
+            "gnews_retry_after_seconds": None,
             "gnews_effective_endpoint_without_key": None,
             "gnews_effective_params_without_key": {},
+            "nyt_status_code": None,
+            "nyt_error_reason": None,
             "nyt_requests_attempted": 0,
             "nyt_articles_returned": 0,
             "nyt_zero_result_queries": 0,
             "nyt_role": "context_news_api",
+            "nyt_effective_endpoint_without_key": None,
+            "nyt_effective_params_without_key": {},
         },
     )
     legacy_paid_skips: dict[str, str] = {}

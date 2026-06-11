@@ -25,6 +25,19 @@ PREFERRED_COMPANY_QUERY_NAMES = {
     "VRT": "Vertiv Holdings",
 }
 WEAK_COVERAGE_TICKERS = frozenset(PREFERRED_COMPANY_QUERY_NAMES)
+NYT_CONTEXT_PRIORITY_BOOST = {
+    "META": 40,
+    "MU": 38,
+    "NVDA": 36,
+    "AMD": 34,
+    "ASML": 20,
+    "PANW": 18,
+    "PLTR": 16,
+    "MRVL": 14,
+    "VRT": 12,
+    "CRWV": 10,
+    "CORZ": 8,
+}
 
 
 @dataclass(frozen=True)
@@ -58,6 +71,7 @@ class TickerQueryPlan:
 
 
 PROVIDER_FAMILIES = {
+    "alpha_vantage_news": "external_market_news_api",
     "marketaux": "external_market_news_api",
     "nyt": "context_news_api",
     "finnhub_news": "external_market_news_api",
@@ -72,6 +86,7 @@ def plan_ticker_queries(
     tracked_tickers: Sequence[TrackedTicker],
     *,
     provider_targets: Sequence[str] = (
+        "alpha_vantage_news",
         "marketaux",
         "nyt",
         "finnhub_news",
@@ -158,7 +173,17 @@ def _provider_queries(
             ("ticker_only", f"{ticker.symbol} stock", LOW_PRECISION, "high", 45)
         )
 
-    if provider == "finnhub_news":
+    if provider == "alpha_vantage_news":
+        base = [
+            (
+                "benchmark_ticker",
+                ticker.symbol,
+                HIGH_PRECISION,
+                "high",
+                120,
+            )
+        ]
+    elif provider == "finnhub_news":
         base = [("company_news", ticker.symbol, HIGH_PRECISION, "high", 100)]
     elif provider == "marketaux":
         base = [
@@ -172,21 +197,21 @@ def _provider_queries(
                 f'"{company}"',
                 HIGH_PRECISION,
                 "high",
-                _coverage_priority(ticker, 105),
+                _nyt_context_priority(ticker, 105),
             ),
             (
                 "company_technology_context",
                 f'"{company}" AI OR chips OR semiconductors OR "data centers" OR cloud OR cybersecurity',
                 HIGH_PRECISION,
                 "medium",
-                _coverage_priority(ticker, 100),
+                _nyt_context_priority(ticker, 100),
             ),
             (
                 "company_policy_context",
                 f'"{company}" antitrust OR regulation OR "export controls" OR "energy infrastructure"',
                 HIGH_PRECISION,
                 "medium",
-                _coverage_priority(ticker, 98),
+                _nyt_context_priority(ticker, 98),
             ),
         ]
     elif provider in {"gnews", "newsapi"} and ticker.symbol in WEAK_COVERAGE_TICKERS:
@@ -252,7 +277,7 @@ def _plan(
     return TickerQueryPlan(
         query_id=f"query-{digest}",
         ticker=ticker.symbol,
-        company=ticker.company_name,
+        company=_company_phrase(ticker),
         query_text=query_text,
         query_type=query_type,
         source_family=family,
@@ -272,6 +297,10 @@ def _company_phrase(ticker: TrackedTicker) -> str:
 
 def _coverage_priority(ticker: TrackedTicker, priority: int) -> int:
     return priority + (10 if ticker.symbol in WEAK_COVERAGE_TICKERS else 0)
+
+
+def _nyt_context_priority(ticker: TrackedTicker, priority: int) -> int:
+    return priority + NYT_CONTEXT_PRIORITY_BOOST.get(ticker.symbol, 0)
 
 
 def _useful_aliases(ticker: TrackedTicker) -> tuple[str, ...]:

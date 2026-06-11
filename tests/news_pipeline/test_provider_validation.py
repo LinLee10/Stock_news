@@ -29,6 +29,7 @@ class ProviderValidationTests(unittest.TestCase):
                 "cnbc_rss",
                 "marketwatch_rss",
                 "sec_edgar",
+                "alpha_vantage_news",
                 "marketaux",
                 "nyt",
                 "gnews",

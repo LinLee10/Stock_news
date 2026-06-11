@@ -187,6 +187,8 @@ class DailyReportInput:
     ticker_sentiment_coverage: Mapping[str, TickerSentimentCoverage] = field(default_factory=dict)
     email_display_summary: EmailDisplaySummary = field(default_factory=EmailDisplaySummary)
     backend_sentiment_inputs: tuple[WeightedArticleSentiment, ...] = ()
+    sentiment_benchmark_rows: tuple[Mapping[str, object], ...] = ()
+    sec_event_candidates: tuple[Mapping[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -319,8 +321,21 @@ def build_daily_report(
                 "top_positive_cluster",
                 "top_negative_cluster",
                 "sentiment_coverage_grade",
+                "internal_weighted_sentiment",
+                "alpha_vantage_weighted_sentiment",
+                "benchmark_coverage_count",
+                "benchmark_disagreement_count",
+                "benchmark_alignment_grade",
             ),
             report_input.ticker_sentiment_coverage.values(),
+        ),
+        _write_dict_rows_csv(
+            output_dir / "ticker_sentiment_benchmark.csv",
+            report_input.sentiment_benchmark_rows,
+        ),
+        _write_dict_rows_csv(
+            output_dir / "sec_event_candidates.csv",
+            report_input.sec_event_candidates,
         ),
         _write_mapping_csv(
             output_dir / "article_type_counts.csv",
@@ -723,6 +738,7 @@ def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
     backend = report_input.backend_article_pool_summary
     email = report_input.email_display_summary
     confidence = report_input.ticker_match_confidence_summary
+    diagnostics = report_input.source_coverage_diagnostics
     return "\n".join(
         [
             "  <h2>Backend and Email Pool Summary</h2>",
@@ -735,6 +751,17 @@ def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
             f"<td class=\"num\">{backend.backend_extracted_articles}</td>"
             f"<td class=\"num\">{email.email_visible_stories}</td>"
             f"<td class=\"num\">{email.email_visible_ranked_reads}</td>"
+            "</tr>",
+            "  </table>",
+            "  <h3>Benchmark and Event Memory</h3>",
+            "  <table>",
+            "    <tr><th>Alpha Vantage Requests</th><th>Alpha Vantage Articles</th><th>Benchmark Disagreements</th><th>SEC Event Candidates</th><th>Event Memory Records</th></tr>",
+            "    <tr>"
+            f"<td class=\"num\">{int(diagnostics.get('alpha_vantage_news_requests_used', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('alpha_vantage_news_articles_returned', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('alpha_vantage_benchmark_disagreement_count', 0))}</td>"
+            f"<td class=\"num\">{sum(int(value) for value in (diagnostics.get('sec_event_candidates_by_form_type') or {}).values())}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('event_memory_records_written', 0))}</td>"
             "</tr>",
             "  </table>",
             "  <table>",
@@ -886,14 +913,17 @@ def _source_acquisition_diagnostics_html(
             f"<td class=\"num\">{int(diagnostics.get('gnews_requests_attempted', 0))}</td>"
             f"<td class=\"num\">{int(diagnostics.get('gnews_articles_returned', 0))}</td>"
             f"<td>{escape(str(diagnostics.get('gnews_status_code') or diagnostics.get('gnews_skipped_reason') or 'no_result'))}</td>"
-            f"<td>{escape(str(diagnostics.get('gnews_error_reason') or 'none'))}</td>"
+            f"<td>{escape(str(diagnostics.get('gnews_error_reason') or 'none'))}; "
+            f"429 count: {int(diagnostics.get('gnews_rate_limited_count', 0))}; "
+            f"retry after: {escape(str(diagnostics.get('gnews_retry_after_seconds') or 'not provided'))}</td>"
             "</tr>",
             "    <tr>"
             "<td>NYT context</td>"
             f"<td class=\"num\">{int(diagnostics.get('nyt_requests_attempted', 0))}</td>"
             f"<td class=\"num\">{int(diagnostics.get('nyt_articles_returned', 0))}</td>"
-            f"<td>{escape(str(diagnostics.get('nyt_role') or 'context_news_api'))}</td>"
-            f"<td>zero-result queries: {int(diagnostics.get('nyt_zero_result_queries', 0))}</td>"
+            f"<td>{escape(str(diagnostics.get('nyt_status_code') or diagnostics.get('nyt_role') or 'context_news_api'))}</td>"
+            f"<td>{escape(str(diagnostics.get('nyt_error_reason') or 'none'))}; "
+            f"zero-result queries: {int(diagnostics.get('nyt_zero_result_queries', 0))}</td>"
             "</tr>",
             "  </table>",
         ]

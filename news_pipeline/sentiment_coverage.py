@@ -55,6 +55,11 @@ class TickerSentimentCoverage:
     top_positive_cluster: str | None
     top_negative_cluster: str | None
     sentiment_coverage_grade: str
+    internal_weighted_sentiment: float = 0.0
+    alpha_vantage_weighted_sentiment: float = 0.0
+    benchmark_coverage_count: int = 0
+    benchmark_disagreement_count: int = 0
+    benchmark_alignment_grade: str = "unavailable"
 
 
 def build_weighted_sentiment_coverage(
@@ -130,6 +135,24 @@ def _weighted_input(
         "dedupe_uniqueness": 1.0 if primary else 0.35,
         "tracked_relevance": 1.1 if ticker.group == "portfolio" else 1.0,
         "source_family": _source_family_factor(article),
+        "dominant_provider_downweight": float(
+            article.metadata.get("dominant_provider_downweight") or 1.0
+        ),
+        "dominant_ticker_downweight": float(
+            article.metadata.get("dominant_ticker_downweight") or 1.0
+        ),
+        "source_diversity_bonus": float(
+            article.metadata.get("source_diversity_bonus") or 1.0
+        ),
+        "direct_api_bonus": float(
+            article.metadata.get("direct_api_bonus") or 1.0
+        ),
+        "official_source_bonus": float(
+            article.metadata.get("official_source_bonus") or 1.0
+        ),
+        "google_backstop_downweight": float(
+            article.metadata.get("google_backstop_downweight") or 1.0
+        ),
     }
     weight = 1.0
     reasons = []

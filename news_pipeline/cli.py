@@ -21,6 +21,10 @@ from .article_fetch import (
     fetch_top_cluster_articles,
 )
 from .article_types import article_type_counts, classify_article_type
+from .benchmarking import (
+    benchmark_rows_with_ticker_summary,
+    build_alpha_vantage_benchmarks,
+)
 from .dedup import cluster_articles
 from .email_preview import PreviewEmailSender
 from .email_sender import (
@@ -36,6 +40,11 @@ from .email_sender import (
     build_report_email_payload,
 )
 from .environment import environment_status, load_cli_environment
+from .event_memory import (
+    build_event_memory_records,
+    sec_event_candidate_rows,
+    write_event_memory_artifacts,
+)
 from .models import Article, ArticleSource, RunResult, SentimentResult, TickerMention
 from .provider_registry import iter_provider_configs
 from .provider_usage import ProviderUsageRecorder
@@ -357,6 +366,17 @@ def main(
                     ),
                 ),
             ))
+            sentiment_urls = {
+                article.canonical_url for article in sentiment_articles
+            }
+            ranking_clusters = [
+                cluster
+                for cluster in clusters
+                if any(
+                    article.canonical_url in sentiment_urls
+                    for article in cluster.articles
+                )
+            ]
             live_rss_summary.update(
                 build_external_quality_diagnostics(
                     raw_articles_by_provider=live_rss_summary.get(
@@ -372,8 +392,8 @@ def main(
                 )
             )
             market_intelligence = build_market_intelligence(
-                articles=articles_for_storage,
-                clusters=clusters,
+                articles=sentiment_articles,
+                clusters=ranking_clusters,
                 run_date=args.run_date,
             )
             backend_sentiment_inputs, ticker_sentiment_coverage = build_weighted_sentiment_coverage(
@@ -381,12 +401,62 @@ def main(
                 clusters=clusters,
                 run_date=args.run_date,
             )
+            benchmark_rows, ticker_sentiment_coverage = (
+                build_alpha_vantage_benchmarks(
+                    articles=post_dedup_articles,
+                    ticker_coverage=ticker_sentiment_coverage,
+                )
+            )
+            benchmark_artifact_rows = benchmark_rows_with_ticker_summary(
+                benchmark_rows,
+                ticker_sentiment_coverage,
+            )
+            live_rss_summary.update(
+                {
+                    "alpha_vantage_benchmark_coverage_by_ticker": {
+                        ticker: row.benchmark_coverage_count
+                        for ticker, row in ticker_sentiment_coverage.items()
+                        if row.benchmark_coverage_count
+                    },
+                    "alpha_vantage_benchmark_disagreement_count": sum(
+                        row.sentiment_disagreement_flag
+                        for row in benchmark_rows
+                    ),
+                }
+            )
             persisted_article_ids = _persist_run_articles(store, run_id, articles_for_storage)
             scores = _score_articles(sentiment_articles)
             sentiment_basis_counts = _score_dict_basis_counts(scores)
             _persist_article_extractions(store, run_id, article_fetch_summary, persisted_article_ids)
             _persist_dedupe_clusters(store, run_id, clusters, args.run_date)
             _persist_sentiment_and_mentions(store, run_id, sentiment_articles)
+            event_memory_records = build_event_memory_records(
+                articles=post_dedup_articles,
+                clusters=clusters,
+                article_fetch_summary=article_fetch_summary,
+                article_ids_by_url=persisted_article_ids,
+                run_id=run_id,
+                run_date=args.run_date,
+            )
+            for record in event_memory_records:
+                store.record_event_memory(record.as_dict())
+            event_memory_json, event_memory_csv = write_event_memory_artifacts(
+                event_memory_records,
+                output_dir=output_dir,
+            )
+            sec_candidates = sec_event_candidate_rows(post_dedup_articles)
+            sec_event_counts: dict[str, int] = {}
+            for row in sec_candidates:
+                form = str(row.get("filing_form_type") or "unknown")
+                sec_event_counts[form] = sec_event_counts.get(form, 0) + 1
+            live_rss_summary.update(
+                {
+                    "sec_event_candidates_by_form_type": dict(
+                        sorted(sec_event_counts.items())
+                    ),
+                    "event_memory_records_written": len(event_memory_records),
+                }
+            )
 
             store.record_run(
                 RunResult(
@@ -424,6 +494,8 @@ def main(
                     article_type_count_summary=article_type_counts(articles_for_storage),
                     ticker_sentiment_coverage=ticker_sentiment_coverage,
                     backend_sentiment_inputs=backend_sentiment_inputs,
+                    sentiment_benchmark_rows=benchmark_artifact_rows,
+                    sec_event_candidates=sec_candidates,
                     max_email_stories=max(1, int(args.max_email_stories)),
                     max_ranked_reads_per_ticker=max(1, int(args.max_ranked_reads_per_ticker)),
                 ),
@@ -497,6 +569,32 @@ def main(
                 ticker: _dataclass_to_dict(row)
                 for ticker, row in report.ticker_sentiment_coverage.items()
             },
+            "alpha_vantage_news_requests_used": live_rss_summary.get(
+                "alpha_vantage_news_requests_used",
+                0,
+            ),
+            "alpha_vantage_news_articles_returned": live_rss_summary.get(
+                "alpha_vantage_news_articles_returned",
+                0,
+            ),
+            "alpha_vantage_benchmark_coverage_by_ticker": live_rss_summary.get(
+                "alpha_vantage_benchmark_coverage_by_ticker",
+                {},
+            ),
+            "alpha_vantage_benchmark_disagreement_count": live_rss_summary.get(
+                "alpha_vantage_benchmark_disagreement_count",
+                0,
+            ),
+            "sec_event_candidates_by_form_type": live_rss_summary.get(
+                "sec_event_candidates_by_form_type",
+                {},
+            ),
+            "event_memory_records_written": live_rss_summary.get(
+                "event_memory_records_written",
+                0,
+            ),
+            "event_memory_json": event_memory_json,
+            "event_memory_csv": event_memory_csv,
             "extraction_queue_size": article_fetch_summary.extraction_queue_size,
             "extraction_selected_count": article_fetch_summary.extraction_selected_count,
             "extraction_skipped_count": article_fetch_summary.extraction_skipped_count,
@@ -600,6 +698,13 @@ def main(
                 0,
             ),
             "gnews_skipped_reason": live_rss_summary.get("gnews_skipped_reason"),
+            "gnews_rate_limited_count": live_rss_summary.get(
+                "gnews_rate_limited_count",
+                0,
+            ),
+            "gnews_retry_after_seconds": live_rss_summary.get(
+                "gnews_retry_after_seconds",
+            ),
             "gnews_effective_endpoint_without_key": live_rss_summary.get(
                 "gnews_effective_endpoint_without_key",
             ),
@@ -611,6 +716,8 @@ def main(
                 "nyt_requests_attempted",
                 0,
             ),
+            "nyt_status_code": live_rss_summary.get("nyt_status_code"),
+            "nyt_error_reason": live_rss_summary.get("nyt_error_reason"),
             "nyt_articles_returned": live_rss_summary.get(
                 "nyt_articles_returned",
                 0,
@@ -620,6 +727,13 @@ def main(
                 0,
             ),
             "nyt_role": live_rss_summary.get("nyt_role", "context_news_api"),
+            "nyt_effective_endpoint_without_key": live_rss_summary.get(
+                "nyt_effective_endpoint_without_key",
+            ),
+            "nyt_effective_params_without_key": live_rss_summary.get(
+                "nyt_effective_params_without_key",
+                {},
+            ),
             "external_api_provider_skipped_reasons": live_rss_summary.get(
                 "external_api_provider_skipped_reasons",
                 {},
@@ -737,6 +851,11 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
         default=True,
     )
     parser.add_argument("--enable-marketaux", action="store_true", default=False)
+    parser.add_argument(
+        "--enable-alpha-vantage-news",
+        action="store_true",
+        default=False,
+    )
     parser.add_argument("--enable-nyt", action="store_true", default=False)
     parser.add_argument("--enable-finnhub-news", action="store_true", default=False)
     parser.add_argument(
@@ -749,6 +868,11 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--enable-newsapi", action="store_true", default=False)
     parser.add_argument("--max-external-api-requests-total", type=int, default=25)
     parser.add_argument("--max-marketaux-requests", type=int, default=10)
+    parser.add_argument(
+        "--max-alpha-vantage-news-requests",
+        type=int,
+        default=5,
+    )
     parser.add_argument("--max-nyt-requests", type=int, default=10)
     parser.add_argument("--max-gnews-requests", type=int, default=5)
     parser.add_argument("--max-finnhub-requests", type=int, default=5)
@@ -844,6 +968,9 @@ def _safe_context(
         ),
         "include_sec_feeds": bool(getattr(args, "include_sec_feeds", True)),
         "external_news_provider_flags": {
+            "alpha_vantage_news": bool(
+                getattr(args, "enable_alpha_vantage_news", False)
+            ),
             "marketaux": bool(getattr(args, "enable_marketaux", False)),
             "nyt": bool(getattr(args, "enable_nyt", False)),
             "finnhub_news": bool(getattr(args, "enable_finnhub_news", False)),
@@ -1085,13 +1212,32 @@ def _collect_daily_articles(
             "gnews_requests_attempted": 0,
             "gnews_articles_returned": 0,
             "gnews_skipped_reason": "global_external_api_flag_disabled",
+            "gnews_rate_limited_count": 0,
+            "gnews_retry_after_seconds": None,
             "gnews_effective_endpoint_without_key": None,
             "gnews_effective_params_without_key": {},
+            "nyt_status_code": None,
+            "nyt_error_reason": None,
             "nyt_requests_attempted": 0,
             "nyt_articles_returned": 0,
             "nyt_zero_result_queries": 0,
             "nyt_role": "context_news_api",
+            "nyt_effective_endpoint_without_key": None,
+            "nyt_effective_params_without_key": {},
             "quota_budget_remaining_estimate": 0,
+            "alpha_vantage_news_requests_used": 0,
+            "alpha_vantage_news_articles_returned": 0,
+            "alpha_vantage_news_status_code": None,
+            "alpha_vantage_news_error_reason": None,
+            "alpha_vantage_news_skipped_reason": (
+                "global_external_api_flag_disabled"
+            ),
+            "alpha_vantage_news_effective_endpoint_without_key": None,
+            "alpha_vantage_news_effective_params_without_key": {},
+            "alpha_vantage_benchmark_coverage_by_ticker": {},
+            "alpha_vantage_benchmark_disagreement_count": 0,
+            "sec_event_candidates_by_form_type": {},
+            "event_memory_records_written": 0,
             "ticker_coverage_status": {},
             "google_dependence_by_ticker": {},
             "direct_or_api_coverage_by_ticker": {},
@@ -1143,6 +1289,7 @@ def _collect_daily_articles(
             include_sec_feeds=bool(args.include_sec_feeds),
             external_api_global_enabled=bool(args.enable_external_news_apis),
             external_provider_flags={
+                "alpha_vantage_news": bool(args.enable_alpha_vantage_news),
                 "marketaux": bool(args.enable_marketaux),
                 "nyt": bool(args.enable_nyt),
                 "finnhub_news": bool(args.enable_finnhub_news),
@@ -1154,6 +1301,10 @@ def _collect_daily_articles(
                 int(args.max_external_api_requests_total),
             ),
             external_provider_request_budgets={
+                "alpha_vantage_news": max(
+                    0,
+                    int(args.max_alpha_vantage_news_requests),
+                ),
                 "marketaux": max(0, int(args.max_marketaux_requests)),
                 "nyt": max(0, int(args.max_nyt_requests)),
                 "gnews": max(0, int(args.max_gnews_requests)),
@@ -1319,13 +1470,32 @@ def _direct_source_diagnostics(
         "gnews_requests_attempted": 0,
         "gnews_articles_returned": 0,
         "gnews_skipped_reason": "global_external_api_flag_disabled",
+        "gnews_rate_limited_count": 0,
+        "gnews_retry_after_seconds": None,
         "gnews_effective_endpoint_without_key": None,
         "gnews_effective_params_without_key": {},
+        "nyt_status_code": None,
+        "nyt_error_reason": None,
         "nyt_requests_attempted": 0,
         "nyt_articles_returned": 0,
         "nyt_zero_result_queries": 0,
         "nyt_role": "context_news_api",
+        "nyt_effective_endpoint_without_key": None,
+        "nyt_effective_params_without_key": {},
         "quota_budget_remaining_estimate": 0,
+        "alpha_vantage_news_requests_used": 0,
+        "alpha_vantage_news_articles_returned": 0,
+        "alpha_vantage_news_status_code": None,
+        "alpha_vantage_news_error_reason": None,
+        "alpha_vantage_news_skipped_reason": (
+            "global_external_api_flag_disabled"
+        ),
+        "alpha_vantage_news_effective_endpoint_without_key": None,
+        "alpha_vantage_news_effective_params_without_key": {},
+        "alpha_vantage_benchmark_coverage_by_ticker": {},
+        "alpha_vantage_benchmark_disagreement_count": 0,
+        "sec_event_candidates_by_form_type": {},
+        "event_memory_records_written": 0,
         "ticker_coverage_status": {},
         "google_dependence_by_ticker": {},
         "direct_or_api_coverage_by_ticker": {},
@@ -1570,6 +1740,8 @@ def _daily_report_input_from_store(
     article_type_count_summary: Mapping[str, int] | None = None,
     ticker_sentiment_coverage: Mapping[str, object] | None = None,
     backend_sentiment_inputs: Sequence[object] = (),
+    sentiment_benchmark_rows: Sequence[Mapping[str, object]] = (),
+    sec_event_candidates: Sequence[Mapping[str, object]] = (),
     max_email_stories: int = DEFAULT_MAX_EMAIL_STORIES,
     max_ranked_reads_per_ticker: int = DEFAULT_MAX_RANKED_READS_PER_TICKER,
 ) -> DailyReportInput:
@@ -1720,6 +1892,8 @@ def _daily_report_input_from_store(
             max_ranked_reads_per_ticker=max_ranked_reads_per_ticker,
         ),
         backend_sentiment_inputs=tuple(backend_sentiment_inputs),
+        sentiment_benchmark_rows=tuple(sentiment_benchmark_rows),
+        sec_event_candidates=tuple(sec_event_candidates),
     )
 
 
@@ -2755,10 +2929,13 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
         f"| GNews | {int(report.source_coverage_diagnostics.get('gnews_requests_attempted', 0))} | "
         f"{int(report.source_coverage_diagnostics.get('gnews_articles_returned', 0))} | "
         f"{_escape_markdown(str(report.source_coverage_diagnostics.get('gnews_status_code') or report.source_coverage_diagnostics.get('gnews_skipped_reason') or 'no_result'))} | "
-        f"{_escape_markdown(str(report.source_coverage_diagnostics.get('gnews_error_reason') or 'none'))} |",
+        f"{_escape_markdown(str(report.source_coverage_diagnostics.get('gnews_error_reason') or 'none'))}; "
+        f"429 count: {int(report.source_coverage_diagnostics.get('gnews_rate_limited_count', 0))}; "
+        f"retry after: {_escape_markdown(str(report.source_coverage_diagnostics.get('gnews_retry_after_seconds') or 'not provided'))} |",
         f"| NYT context | {int(report.source_coverage_diagnostics.get('nyt_requests_attempted', 0))} | "
         f"{int(report.source_coverage_diagnostics.get('nyt_articles_returned', 0))} | "
-        f"{_escape_markdown(str(report.source_coverage_diagnostics.get('nyt_role') or 'context_news_api'))} | "
+        f"{_escape_markdown(str(report.source_coverage_diagnostics.get('nyt_status_code') or report.source_coverage_diagnostics.get('nyt_role') or 'context_news_api'))} | "
+        f"{_escape_markdown(str(report.source_coverage_diagnostics.get('nyt_error_reason') or 'none'))}; "
         f"zero-result queries: {int(report.source_coverage_diagnostics.get('nyt_zero_result_queries', 0))} |",
         "",
         "### Source Quality Summary",

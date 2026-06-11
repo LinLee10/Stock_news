@@ -295,7 +295,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run["articles_seen"], payload["article_count"])
             self.assertEqual(len(articles), payload["article_count"])
             self.assertEqual(len(sources), payload["article_count"])
-            self.assertEqual(len(provider_validation), 11)
+            self.assertEqual(len(provider_validation), 12)
             self.assertEqual(len(clusters), payload["cluster_count"])
             self.assertEqual(len(sentiments), payload["score_count"])
             self.assertTrue(any(row["ticker"] == "NVDA" for row in mentions))
@@ -313,7 +313,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(first["run_id"], second["run_id"])
             self.assertEqual(first_counts, second_counts)
             self.assertEqual(second_counts["runs"], 1)
-            self.assertEqual(second_counts["provider_validation"], 11)
+            self.assertEqual(second_counts["provider_validation"], 12)
             self.assertEqual(second_counts["provider_usage"], 0)
             self.assertEqual(second_counts["run_articles"], second["article_count"])
             self.assertEqual(second_counts["dedupe_clusters"], second["cluster_count"])
@@ -338,7 +338,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(first_counts, second_counts)
             self.assertEqual(second_counts["runs"], 1)
             self.assertEqual(second_counts["provider_usage"], 1)
-            self.assertEqual(second_counts["provider_validation"], 11)
+            self.assertEqual(second_counts["provider_validation"], 12)
             self.assertEqual(second_counts["run_articles"], second["article_count"])
 
     def test_dry_run_daily_writes_email_preview_without_email_network(self):

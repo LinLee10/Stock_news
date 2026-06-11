@@ -6,7 +6,8 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import json
-from time import monotonic
+import re
+from time import monotonic, sleep
 from typing import Callable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -41,6 +42,7 @@ class ExternalApiAttempt:
     skipped_reason: str | None = None
     error_class: str | None = None
     error_message: str | None = None
+    retry_after_seconds: float | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +57,7 @@ class ExternalApiAttempt:
             "skipped_reason": self.skipped_reason,
             "error_class": self.error_class,
             "error_message": self.error_message,
+            "retry_after_seconds": self.retry_after_seconds,
         }
 
 
@@ -65,8 +68,16 @@ class ExternalApiCollectionResult:
     diagnostics: Mapping[str, object]
 
 
-PROVIDER_ORDER = ("marketaux", "nyt", "finnhub_news", "gnews", "newsapi")
+PROVIDER_ORDER = (
+    "alpha_vantage_news",
+    "marketaux",
+    "nyt",
+    "finnhub_news",
+    "gnews",
+    "newsapi",
+)
 PROVIDER_ENV_VARS = {
+    "alpha_vantage_news": "ALPHA_VANTAGE_KEY",
     "marketaux": "MARKETAUX_API_KEY",
     "nyt": "NYT_API_KEY",
     "finnhub_news": "FINNHUB_KEY",
@@ -78,6 +89,13 @@ DEFAULT_MAX_EXTERNAL_ARTICLES_PER_TICKER = 40
 DEFAULT_MAX_EXTERNAL_PROVIDER_SHARE_POST_DEDUP = 0.60
 DEFAULT_PROVIDER_CONCENTRATION_WARNING_THRESHOLD = 0.60
 DEFAULT_TICKER_CONCENTRATION_WARNING_THRESHOLD = 0.35
+DEFAULT_DOMINANT_PROVIDER_DOWNWEIGHT = 0.70
+DEFAULT_DOMINANT_TICKER_DOWNWEIGHT = 0.75
+DEFAULT_SOURCE_DIVERSITY_BONUS = 1.05
+DEFAULT_DIRECT_API_BONUS = 1.05
+DEFAULT_OFFICIAL_SOURCE_BONUS = 1.10
+DEFAULT_GOOGLE_BACKSTOP_DOWNWEIGHT = 0.75
+NYT_CONTEXT_LOOKBACK_DAYS = 30
 
 
 def collect_external_api_articles(
@@ -142,6 +160,8 @@ def collect_external_api_articles(
             if remaining_total <= 0 or requests_by_provider[provider] >= provider_budget:
                 break
             started = monotonic()
+            if requests_by_provider[provider]:
+                sleep(max(0.0, float(profile.default_rate_limit_seconds)))
             requests_by_provider[provider] += 1
             remaining_total -= 1
             try:
@@ -191,10 +211,11 @@ def collect_external_api_articles(
                     )
                 )
             except Exception as exc:  # noqa: BLE001 - isolate provider requests.
+                rate_limited = isinstance(exc, HTTPError) and exc.code == 429
                 attempts.append(
                     ExternalApiAttempt(
                         provider=provider,
-                        status="failure",
+                        status="rate_limited" if rate_limited else "failure",
                         request_count=1,
                         article_count=0,
                         query_id=plan.query_id,
@@ -203,14 +224,22 @@ def collect_external_api_articles(
                         status_code=exc.code if isinstance(exc, HTTPError) else None,
                         error_class=type(exc).__name__,
                         error_message=_safe_external_error(exc),
+                        retry_after_seconds=_retry_after_seconds(exc),
                     )
                 )
+                if rate_limited:
+                    break
 
     unique = _unique_articles(articles)
     gnews_attempts = tuple(
         attempt for attempt in attempts if attempt.provider == "gnews"
     )
     nyt_attempts = tuple(attempt for attempt in attempts if attempt.provider == "nyt")
+    alpha_vantage_attempts = tuple(
+        attempt
+        for attempt in attempts
+        if attempt.provider == "alpha_vantage_news"
+    )
     diagnostics = {
         "external_api_provider_usage": [attempt.as_dict() for attempt in attempts],
         "external_api_provider_skipped_reasons": dict(sorted(skipped_reasons.items())),
@@ -223,6 +252,27 @@ def collect_external_api_articles(
         "external_api_total_requests_used": sum(requests_by_provider.values()),
         "external_api_total_request_budget": max(0, int(total_request_budget)),
         "quota_budget_remaining_estimate": max(0, remaining_total),
+        "alpha_vantage_news_requests_used": sum(
+            attempt.request_count for attempt in alpha_vantage_attempts
+        ),
+        "alpha_vantage_news_articles_returned": sum(
+            attempt.article_count for attempt in alpha_vantage_attempts
+        ),
+        "alpha_vantage_news_status_code": _provider_status_code(
+            alpha_vantage_attempts
+        ),
+        "alpha_vantage_news_error_reason": _provider_error_reason(
+            alpha_vantage_attempts
+        ),
+        "alpha_vantage_news_skipped_reason": skipped_reasons.get(
+            "alpha_vantage_news"
+        ),
+        "alpha_vantage_news_effective_endpoint_without_key": (
+            effective_requests.get("alpha_vantage_news", {}).get("endpoint")
+        ),
+        "alpha_vantage_news_effective_params_without_key": (
+            effective_requests.get("alpha_vantage_news", {}).get("params") or {}
+        ),
         "gnews_status_code": _provider_status_code(gnews_attempts),
         "gnews_error_reason": _provider_error_reason(gnews_attempts),
         "gnews_requests_attempted": sum(
@@ -232,6 +282,12 @@ def collect_external_api_articles(
             attempt.article_count for attempt in gnews_attempts
         ),
         "gnews_skipped_reason": skipped_reasons.get("gnews"),
+        "gnews_rate_limited_count": sum(
+            attempt.status == "rate_limited" for attempt in gnews_attempts
+        ),
+        "gnews_retry_after_seconds": _provider_retry_after_seconds(
+            gnews_attempts
+        ),
         "gnews_effective_endpoint_without_key": (
             effective_requests.get("gnews", {}).get("endpoint")
         ),
@@ -248,7 +304,15 @@ def collect_external_api_articles(
             attempt.status == "success" and attempt.article_count == 0
             for attempt in nyt_attempts
         ),
+        "nyt_status_code": _provider_status_code(nyt_attempts),
+        "nyt_error_reason": _provider_error_reason(nyt_attempts),
         "nyt_role": "context_news_api",
+        "nyt_effective_endpoint_without_key": (
+            effective_requests.get("nyt", {}).get("endpoint")
+        ),
+        "nyt_effective_params_without_key": (
+            effective_requests.get("nyt", {}).get("params") or {}
+        ),
     }
     return ExternalApiCollectionResult(
         articles=tuple(unique),
@@ -264,8 +328,17 @@ def balance_external_sentiment_articles(
     max_articles_per_ticker: int = DEFAULT_MAX_EXTERNAL_ARTICLES_PER_TICKER,
     max_provider_share: float = DEFAULT_MAX_EXTERNAL_PROVIDER_SHARE_POST_DEDUP,
 ) -> tuple[Article, ...]:
+    annotated_articles = _annotate_scoring_balance(
+        articles,
+        max_provider_share=max_provider_share,
+    )
     external = sorted(
-        (article for article in articles if _is_external_article(article)),
+        (
+            article
+            for article in annotated_articles
+            if _is_external_article(article)
+            and not article.metadata.get("benchmark_only")
+        ),
         key=_external_article_priority,
         reverse=True,
     )
@@ -294,8 +367,11 @@ def balance_external_sentiment_articles(
     selected_urls = {article.canonical_url for article in selected}
     return tuple(
         article
-        for article in articles
-        if not _is_external_article(article)
+        for article in annotated_articles
+        if (
+            not _is_external_article(article)
+            and not article.metadata.get("benchmark_only")
+        )
         or article.canonical_url in selected_urls
     )
 
@@ -416,10 +492,102 @@ def _external_article_tickers(article: Article) -> tuple[str, ...]:
 
 def _external_article_priority(article: Article) -> tuple[float, str, str]:
     return (
-        float(article.metadata.get("acquisition_score") or 0.0),
+        float(article.metadata.get("acquisition_score") or 0.0)
+        * _scoring_balance_factor(article),
         str(article.published_at or ""),
         article.canonical_url,
     )
+
+
+def _annotate_scoring_balance(
+    articles: Sequence[Article],
+    *,
+    max_provider_share: float,
+) -> tuple[Article, ...]:
+    provider_counts, ticker_counts = _external_counts(articles)
+    provider_share, dominant_provider = _top_share(provider_counts)
+    ticker_total = sum(ticker_counts.values())
+    dominant_tickers = {
+        ticker
+        for ticker, count in ticker_counts.items()
+        if ticker_total
+        and count / ticker_total
+        > DEFAULT_TICKER_CONCENTRATION_WARNING_THRESHOLD
+    }
+    provider_limit = max(0.0, min(1.0, float(max_provider_share)))
+    provider_dominates = (
+        dominant_provider is not None and provider_share > provider_limit
+    )
+    multiple_providers = len(provider_counts) > 1
+    annotated: list[Article] = []
+    for article in articles:
+        provider = _external_provider(article)
+        tickers = _external_article_tickers(article)
+        family = str(article.metadata.get("source_family") or "")
+        external = _is_external_article(article)
+        factors = {
+            "dominant_provider_downweight": (
+                DEFAULT_DOMINANT_PROVIDER_DOWNWEIGHT
+                if external
+                and provider_dominates
+                and provider == dominant_provider
+                else 1.0
+            ),
+            "dominant_ticker_downweight": (
+                DEFAULT_DOMINANT_TICKER_DOWNWEIGHT
+                if external and any(ticker in dominant_tickers for ticker in tickers)
+                else 1.0
+            ),
+            "source_diversity_bonus": (
+                DEFAULT_SOURCE_DIVERSITY_BONUS
+                if external
+                and multiple_providers
+                and provider != dominant_provider
+                else 1.0
+            ),
+            "direct_api_bonus": (
+                DEFAULT_DIRECT_API_BONUS
+                if external and article.metadata.get("direct_source")
+                else 1.0
+            ),
+            "official_source_bonus": (
+                DEFAULT_OFFICIAL_SOURCE_BONUS
+                if family in {"regulatory_official", "company_ir"}
+                else 1.0
+            ),
+            "google_backstop_downweight": (
+                DEFAULT_GOOGLE_BACKSTOP_DOWNWEIGHT
+                if family == "google_news_backstop"
+                else 1.0
+            ),
+        }
+        annotated.append(
+            Article(
+                canonical_url=article.canonical_url,
+                title=article.title,
+                article_id=article.article_id,
+                published_at=article.published_at,
+                full_text=article.full_text,
+                snippet=article.snippet,
+                metadata={**article.metadata, **factors},
+                created_at=article.created_at,
+            )
+        )
+    return tuple(annotated)
+
+
+def _scoring_balance_factor(article: Article) -> float:
+    factor = 1.0
+    for name in (
+        "dominant_provider_downweight",
+        "dominant_ticker_downweight",
+        "source_diversity_bonus",
+        "direct_api_bonus",
+        "official_source_bonus",
+        "google_backstop_downweight",
+    ):
+        factor *= float(article.metadata.get(name) or 1.0)
+    return factor
 
 
 def _provider_skip_reason(
@@ -469,6 +637,19 @@ def _request_provider(
     timeout_seconds: float,
     fetch_json: HttpJsonFetcher,
 ) -> Mapping[str, object] | Sequence[object]:
+    if provider == "alpha_vantage_news":
+        return fetch_json(
+            "https://www.alphavantage.co/query",
+            {
+                "function": "NEWS_SENTIMENT",
+                "tickers": plan.ticker,
+                "sort": "LATEST",
+                "limit": 50,
+                "apikey": api_key,
+            },
+            {},
+            timeout_seconds,
+        )
     if provider == "marketaux":
         return fetch_json(
             "https://api.marketaux.com/v1/news/all",
@@ -490,9 +671,10 @@ def _request_provider(
             {
                 "q": plan.query_text,
                 "sort": "newest",
-                "begin_date": (date.fromisoformat(run_date) - timedelta(days=7)).strftime(
-                    "%Y%m%d"
-                ),
+                "begin_date": (
+                    date.fromisoformat(run_date)
+                    - timedelta(days=NYT_CONTEXT_LOOKBACK_DAYS)
+                ).strftime("%Y%m%d"),
                 "api-key": api_key,
             },
             {},
@@ -545,6 +727,16 @@ def _safe_provider_request(
     *,
     run_date: str,
 ) -> tuple[str, dict[str, object]]:
+    if provider == "alpha_vantage_news":
+        return (
+            "https://www.alphavantage.co/query",
+            {
+                "function": "NEWS_SENTIMENT",
+                "tickers": plan.ticker,
+                "sort": "LATEST",
+                "limit": 50,
+            },
+        )
     if provider == "marketaux":
         return (
             "https://api.marketaux.com/v1/news/all",
@@ -564,7 +756,8 @@ def _safe_provider_request(
                 "q": plan.query_text,
                 "sort": "newest",
                 "begin_date": (
-                    date.fromisoformat(run_date) - timedelta(days=7)
+                    date.fromisoformat(run_date)
+                    - timedelta(days=NYT_CONTEXT_LOOKBACK_DAYS)
                 ).strftime("%Y%m%d"),
             },
         )
@@ -654,7 +847,9 @@ def _provider_items(
     provider: str,
     payload: Mapping[str, object] | Sequence[object],
 ) -> Sequence[object]:
-    if provider == "marketaux":
+    if provider == "alpha_vantage_news":
+        items = payload.get("feed", ()) if isinstance(payload, Mapping) else ()
+    elif provider == "marketaux":
         items = payload.get("data", ()) if isinstance(payload, Mapping) else ()
     elif provider == "nyt":
         response = payload.get("response", {}) if isinstance(payload, Mapping) else {}
@@ -676,7 +871,34 @@ def _normalize_item(
     profile: SourceProfile,
     api_request_count: int,
 ) -> Article | None:
-    if provider == "nyt":
+    if provider == "alpha_vantage_news":
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("url") or "").strip()
+        snippet = str(item.get("summary") or "").strip()
+        published_at = _alpha_vantage_published_at(item.get("time_published"))
+        source = str(item.get("source") or "Alpha Vantage")
+        provider_id = None
+        ticker_sentiment = tuple(
+            dict(entry)
+            for entry in (item.get("ticker_sentiment") or ())
+            if isinstance(entry, Mapping)
+        )
+        symbols = tuple(
+            str(entry.get("ticker") or "").upper()
+            for entry in ticker_sentiment
+            if entry.get("ticker")
+        )
+        benchmark = next(
+            (
+                entry
+                for entry in ticker_sentiment
+                if str(entry.get("ticker") or "").upper() == plan.ticker
+            ),
+            {},
+        )
+        company_specific = plan.ticker in symbols
+        context_only = False
+    elif provider == "nyt":
         headline = item.get("headline") or {}
         title = str(
             headline.get("main") if isinstance(headline, Mapping) else ""
@@ -727,6 +949,43 @@ def _normalize_item(
         context_only = False
     if not title or not url:
         return None
+    provider_metadata: dict[str, object] = {}
+    if provider == "alpha_vantage_news":
+        provider_metadata = {
+            "alpha_vantage_source": item.get("source"),
+            "alpha_vantage_url": item.get("url"),
+            "alpha_vantage_title": item.get("title"),
+            "alpha_vantage_time_published": item.get("time_published"),
+            "overall_sentiment_score": _optional_float(
+                item.get("overall_sentiment_score")
+            ),
+            "overall_sentiment_label": item.get("overall_sentiment_label"),
+            "ticker_sentiment": list(ticker_sentiment),
+            "relevance_score": _optional_float(benchmark.get("relevance_score")),
+            "alpha_vantage_ticker_sentiment_score": _optional_float(
+                benchmark.get("ticker_sentiment_score")
+            ),
+            "alpha_vantage_ticker_sentiment_label": benchmark.get(
+                "ticker_sentiment_label"
+            ),
+            "topics": [
+                dict(topic)
+                for topic in (item.get("topics") or ())
+                if isinstance(topic, Mapping)
+            ],
+            "external_sentiment_provider": "alpha_vantage_news",
+            "external_sentiment": _optional_float(
+                benchmark.get("ticker_sentiment_score")
+            )
+            if benchmark
+            else _optional_float(item.get("overall_sentiment_score")),
+            "external_sentiment_label": (
+                benchmark.get("ticker_sentiment_label")
+                if benchmark
+                else item.get("overall_sentiment_label")
+            ),
+            "benchmark_only": True,
+        }
     return Article(
         canonical_url=canonicalize_url(url),
         title=title,
@@ -757,14 +1016,25 @@ def _normalize_item(
             "ticker_match_confidence": 0.95 if company_specific else 0.45,
             "description": snippet or None,
             "direct_source": True,
+            **provider_metadata,
         },
     )
 
 
 def _company_specific(title: str, snippet: str, plan: TickerQueryPlan) -> bool:
     text = f"{title} {snippet}".casefold()
-    return plan.company.casefold() in text or (
-        plan.ticker.casefold() in text and "stock" in text
+    return _contains_term(text, plan.company.casefold()) or (
+        _contains_term(text, plan.ticker.casefold())
+        and _contains_term(text, "stock")
+    )
+
+
+def _contains_term(text: str, term: str) -> bool:
+    return bool(
+        re.search(
+            rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])",
+            text,
+        )
     )
 
 
@@ -774,6 +1044,25 @@ def _finnhub_published_at(value: object) -> str | None:
     except (TypeError, ValueError):
         return str(value or "") or None
     return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+
+def _alpha_vantage_published_at(value: object) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y%m%dT%H%M%S").replace(
+            tzinfo=timezone.utc
+        ).isoformat()
+    except ValueError:
+        return raw
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _article_symbols(article: Article) -> tuple[str, ...]:
@@ -810,12 +1099,22 @@ def _fetch_json(
 
 
 def _provider_status_code(attempts: Sequence[ExternalApiAttempt]) -> int | None:
-    successful = next(
-        (attempt.status_code for attempt in attempts if attempt.status == "success"),
-        None,
+    prioritized = (
+        "rate_limited",
+        "failure",
+        "success",
     )
-    if successful is not None:
-        return successful
+    for status in prioritized:
+        code = next(
+            (
+                attempt.status_code
+                for attempt in reversed(tuple(attempts))
+                if attempt.status == status and attempt.status_code is not None
+            ),
+            None,
+        )
+        if code is not None:
+            return code
     return next(
         (attempt.status_code for attempt in attempts if attempt.status_code is not None),
         None,
@@ -835,9 +1134,32 @@ def _provider_error_reason(attempts: Sequence[ExternalApiAttempt]) -> str | None
 
 def _safe_external_error(error: Exception) -> str:
     if isinstance(error, HTTPError):
+        if error.code == 429:
+            return "rate_limited"
         return f"http_status_{error.code}"
     if isinstance(error, URLError):
         return f"network_error_{type(error.reason).__name__}"
     if isinstance(error, (TimeoutError, json.JSONDecodeError)):
         return type(error).__name__
     return "external_api_request_failed"
+
+
+def _retry_after_seconds(error: Exception) -> float | None:
+    if not isinstance(error, HTTPError) or error.code != 429:
+        return None
+    value = error.headers.get("Retry-After") if error.headers else None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _provider_retry_after_seconds(
+    attempts: Sequence[ExternalApiAttempt],
+) -> float | None:
+    values = [
+        attempt.retry_after_seconds
+        for attempt in attempts
+        if attempt.retry_after_seconds is not None
+    ]
+    return max(values) if values else None
