@@ -35,6 +35,7 @@ from .email_sender import (
     SmtpEmailSender,
     build_report_email_payload,
 )
+from .environment import environment_status, load_cli_environment
 from .models import Article, ArticleSource, RunResult, SentimentResult, TickerMention
 from .provider_registry import iter_provider_configs
 from .provider_usage import ProviderUsageRecorder
@@ -146,16 +147,26 @@ def main(
     environ: Mapping[str, str] | None = None,
     email_sender: EmailSender | None = None,
 ) -> int:
+    runtime_environ, dotenv_status = load_cli_environment(environ)
     parser = build_parser()
     args = parser.parse_args(argv)
-    runtime_environ = os.environ if environ is None else environ
 
     output_dir = _run_output_dir(args.artifacts_dir, args.run_date)
     if args.command == "send-daily-report":
-        return _send_daily_report(args, output_dir, environ=environ, email_sender=email_sender)
+        return _send_daily_report(
+            args,
+            output_dir,
+            environ=runtime_environ,
+            dotenv_status=dotenv_status,
+            email_sender=email_sender,
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    context = _safe_context(args)
+    context = _safe_context(
+        args,
+        environ=runtime_environ,
+        dotenv_status=dotenv_status,
+    )
 
     if args.command == "init-db":
         database_path = Path(args.database_path) if args.database_path else output_dir / "news_pipeline.sqlite3"
@@ -270,7 +281,11 @@ def main(
         store = initialize_database(database_path)
         try:
             store.reset_run(run_id)
-            provider_results = _provider_validation_results(args, provider_checker, environ)
+            provider_results = _provider_validation_results(
+                args,
+                provider_checker,
+                runtime_environ,
+            )
             for result in provider_results:
                 store.record_provider_validation(run_id, result)
 
@@ -779,7 +794,13 @@ def _add_send_daily_report_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--backend", choices=("smtp",), default="smtp")
 
 
-def _safe_context(args: argparse.Namespace) -> dict[str, object]:
+def _safe_context(
+    args: argparse.Namespace,
+    *,
+    environ: Mapping[str, str] | None = None,
+    dotenv_status: str = "not_checked",
+) -> dict[str, object]:
+    runtime_environ = os.environ if environ is None else environ
     return {
         "command": args.command,
         "run_date": args.run_date,
@@ -853,6 +874,10 @@ def _safe_context(args: argparse.Namespace) -> dict[str, object]:
                 DEFAULT_MAX_EXTERNAL_PROVIDER_SHARE_POST_DEDUP,
             )
         ),
+        "environment": {
+            "local_dotenv_status": dotenv_status,
+            "variables": environment_status(runtime_environ),
+        },
     }
 
 
@@ -865,9 +890,14 @@ def _send_daily_report(
     output_dir: Path,
     *,
     environ: Mapping[str, str] | None = None,
+    dotenv_status: str = "not_checked",
     email_sender: EmailSender | None = None,
 ) -> int:
-    context = _safe_context(args)
+    context = _safe_context(
+        args,
+        environ=environ,
+        dotenv_status=dotenv_status,
+    )
     recipient = str(args.to or "").strip()
     if not recipient:
         _print_json(
