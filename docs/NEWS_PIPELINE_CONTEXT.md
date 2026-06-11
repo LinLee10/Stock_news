@@ -44,6 +44,8 @@ The production pipeline currently includes:
 18. Project-root `.env.local` loading through CLI startup.
 19. Diagnostic artifacts and a report contract.
 20. SQLite and artifact-backed event memory.
+21. Coverage-aware Alpha Vantage benchmark allocation.
+22. First-pass comparison with event memory from the latest prior dated run.
 
 ## API And Source State
 
@@ -89,16 +91,27 @@ source-layer risks include:
 - AMD concentration.
 - Coverage gaps or Google dependence for tickers such as MU and META,
   depending on the run.
-- Alpha Vantage request selection currently uses equal-priority per-ticker
-  plans, so small request budgets favor alphabetically early ticker symbols.
 - Free-tier quota and rate-limit variability.
 - Source-quality classification gaps for unfamiliar publishers.
+- Alpha Vantage allocation uses current direct coverage plus prior-run
+  benchmark coverage and Google-dependence signals. A first-ever run has less
+  historical evidence and must bootstrap from portfolio priority, current
+  coverage gaps, and known weak-coverage names.
+- Historical event identity currently uses ticker plus canonical URL. It does
+  not yet recognize a recurring event when publishers or URLs change.
 
 The Alpha Vantage News Sentiment benchmark and initial durable event memory are
-implemented in the current worktree. The next recommended phase is to harden
-historical article/event/sentiment comparisons, improve benchmark matching and
-calibration, validate event-memory migrations over repeated runs, and consider
-deeper SEC filing parsing as a separately scoped future phase.
+implemented in the current worktree. Alpha Vantage request allocation now
+prioritizes portfolio names, weak-coverage names, Google-dominated names, and
+tickers with few prior benchmark records instead of relying on alphabetical
+order. Reports compare the current event-memory records with the latest prior
+dated run when available and report `history_building` cleanly otherwise.
+
+The next recommended phase is to improve cross-run event identity beyond exact
+canonical URLs, add multi-run sentiment trend summaries and benchmark
+calibration, validate retention and schema migration behavior over a longer
+history, and consider deeper SEC filing parsing as a separately scoped future
+phase.
 
 ## Event And Sentiment Memory
 
@@ -117,6 +130,11 @@ historical records. Durable records currently target:
 - External sentiment provider and score.
 - Event summary.
 - Run ID and run date.
+
+The first historical comparison reads the latest earlier dated run database in
+read-only mode. It records new and repeated ticker/URL events and per-ticker
+changes in average internal sentiment. Same-day reruns are intentionally not
+treated as an earlier reporting period.
 
 SEC candidates are classified at least for:
 

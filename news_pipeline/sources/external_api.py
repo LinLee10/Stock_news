@@ -19,7 +19,11 @@ from news_pipeline.models import Article
 from news_pipeline.ticker_matching import assess_ticker_matches
 from news_pipeline.tickers import TrackedTicker
 
-from .query_planner import TickerQueryPlan, provider_query_plans
+from .query_planner import (
+    PREFERRED_COMPANY_QUERY_NAMES,
+    TickerQueryPlan,
+    provider_query_plans,
+)
 from .source_registry import SourceProfile
 
 
@@ -96,6 +100,18 @@ DEFAULT_DIRECT_API_BONUS = 1.05
 DEFAULT_OFFICIAL_SOURCE_BONUS = 1.10
 DEFAULT_GOOGLE_BACKSTOP_DOWNWEIGHT = 0.75
 NYT_CONTEXT_LOOKBACK_DAYS = 30
+ALPHA_VANTAGE_FEW_BENCHMARK_RECORDS = 5
+ALPHA_VANTAGE_KNOWN_GAP_BOOST = {
+    "MU": 45,
+    "META": 43,
+    "ASML": 15,
+    "PLTR": 10,
+    "MRVL": 9,
+    "PANW": 8,
+    "VRT": 7,
+    "CRWV": 6,
+    "CORZ": 5,
+}
 
 
 def collect_external_api_articles(
@@ -111,6 +127,7 @@ def collect_external_api_articles(
     run_date: str,
     timeout_seconds: float,
     fetch_json: HttpJsonFetcher | None = None,
+    alpha_vantage_selection_context: Mapping[str, object] | None = None,
 ) -> ExternalApiCollectionResult:
     fetcher = fetch_json or _fetch_json
     remaining_total = max(0, int(total_request_budget))
@@ -121,6 +138,22 @@ def collect_external_api_articles(
     articles_by_provider: Counter[str] = Counter()
     articles_by_ticker: Counter[str] = Counter()
     effective_requests: dict[str, dict[str, object]] = {}
+    alpha_selected_tickers: tuple[str, ...] = ()
+    alpha_selection_reasons: dict[str, list[str]] = {}
+    weak_coverage_tickers = tuple(
+        sorted(
+            {
+                str(ticker).upper()
+                for ticker in (
+                    (alpha_vantage_selection_context or {}).get(
+                        "weak_coverage_tickers",
+                        (),
+                    )
+                    or ()
+                )
+            }
+        )
+    )
 
     for provider in PROVIDER_ORDER:
         profile = profiles.get(provider)
@@ -152,10 +185,17 @@ def collect_external_api_articles(
             remaining_total,
             max(0, int(provider_request_budgets.get(provider, 0))),
         )
-        plans = _selected_plans(
-            provider_query_plans(query_plans, provider),
-            provider_budget,
-        )
+        provider_plans = provider_query_plans(query_plans, provider)
+        if provider == "alpha_vantage_news":
+            plans, alpha_selection_reasons = select_alpha_vantage_query_plans(
+                provider_plans,
+                tracked_tickers=tracked_tickers,
+                budget=provider_budget,
+                selection_context=alpha_vantage_selection_context,
+            )
+            alpha_selected_tickers = tuple(plan.ticker for plan in plans)
+        else:
+            plans = _selected_plans(provider_plans, provider_budget)
         for plan in plans:
             if remaining_total <= 0 or requests_by_provider[provider] >= provider_budget:
                 break
@@ -273,6 +313,9 @@ def collect_external_api_articles(
         "alpha_vantage_news_effective_params_without_key": (
             effective_requests.get("alpha_vantage_news", {}).get("params") or {}
         ),
+        "alpha_vantage_selected_tickers": list(alpha_selected_tickers),
+        "alpha_vantage_selection_reasons": alpha_selection_reasons,
+        "weak_coverage_tickers": list(weak_coverage_tickers),
         "gnews_status_code": _provider_status_code(gnews_attempts),
         "gnews_error_reason": _provider_error_reason(gnews_attempts),
         "gnews_requests_attempted": sum(
@@ -626,6 +669,70 @@ def _selected_plans(
         selected.append(plan)
         seen_tickers.add(plan.ticker)
     return tuple(selected)
+
+
+def select_alpha_vantage_query_plans(
+    plans: Sequence[TickerQueryPlan],
+    *,
+    tracked_tickers: Sequence[TrackedTicker],
+    budget: int,
+    selection_context: Mapping[str, object] | None = None,
+) -> tuple[tuple[TickerQueryPlan, ...], dict[str, list[str]]]:
+    context = selection_context or {}
+    weak_tickers = {
+        str(ticker).upper()
+        for ticker in (context.get("weak_coverage_tickers") or ())
+    }
+    google_dominated = {
+        str(ticker).upper()
+        for ticker in (context.get("google_dominated_tickers") or ())
+    }
+    benchmark_counts = {
+        str(ticker).upper(): int(count)
+        for ticker, count in (
+            context.get("benchmark_coverage_counts") or {}
+        ).items()
+    }
+    groups = {ticker.symbol: ticker.group for ticker in tracked_tickers}
+    by_ticker: dict[str, TickerQueryPlan] = {}
+    for plan in sorted(
+        plans,
+        key=lambda item: (-item.priority, item.query_id),
+    ):
+        by_ticker.setdefault(plan.ticker, plan)
+
+    ranked: list[tuple[int, int, str, TickerQueryPlan, list[str]]] = []
+    for ticker, plan in by_ticker.items():
+        score = 0
+        reasons: list[str] = []
+        if groups.get(ticker) == "portfolio":
+            score += 30
+            reasons.append("portfolio")
+        if ticker in weak_tickers:
+            score += 25
+            reasons.append("weak_coverage")
+        if ticker in google_dominated:
+            score += 30
+            reasons.append("google_dominated")
+        benchmark_count = max(0, benchmark_counts.get(ticker, 0))
+        if benchmark_count < ALPHA_VANTAGE_FEW_BENCHMARK_RECORDS:
+            score += (
+                ALPHA_VANTAGE_FEW_BENCHMARK_RECORDS - benchmark_count
+            ) * 6
+            reasons.append("few_benchmark_records")
+        if ticker in PREFERRED_COMPANY_QUERY_NAMES:
+            score += ALPHA_VANTAGE_KNOWN_GAP_BOOST.get(ticker, 4)
+            reasons.append("known_coverage_gap")
+        ranked.append((score, -benchmark_count, ticker, plan, reasons))
+
+    selected = sorted(
+        ranked,
+        key=lambda item: (-item[0], -item[1], item[2]),
+    )[: max(0, int(budget))]
+    return (
+        tuple(item[3] for item in selected),
+        {item[2]: item[4] for item in selected},
+    )
 
 
 def _request_provider(

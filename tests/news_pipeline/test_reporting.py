@@ -52,6 +52,7 @@ class ReportingTests(unittest.TestCase):
     def test_report_tables_and_links_are_in_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             report = build_daily_report(_fake_report_input(), artifacts_dir=Path(temp_dir))
+            html = Path(report.html_preview_report).read_text(encoding="utf-8")
 
             self.assertEqual(report.portfolio_30d_sentiment_table[0].ticker, "AAPL")
             self.assertEqual(report.watchlist_sentiment_table[0].ticker, "NVDA")
@@ -62,6 +63,10 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(report.recency_sections["today_signal"][0].ticker, "NVDA")
             self.assertEqual(report.top_event_clusters[0].ticker, "AAPL")
             self.assertEqual(report.supporting_article_links["AAPL"][0].url, "https://example.com/aapl")
+            self.assertIn("Alpha selection reasons:", html)
+            self.assertIn("MU: portfolio, weak_coverage", html)
+            self.assertIn("compared_to_prior_run", html)
+            self.assertIn("NVDA: +0.1250", html)
 
     def test_csv_attachment_contains_expected_rows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -192,6 +197,22 @@ def _fake_report_input() -> DailyReportInput:
             ),
             "paid_api_skipped_reasons": {"marketaux": "global_paid_api_flag_disabled"},
             "missing_company_ir_profiles": ("AAPL",),
+            "alpha_vantage_selected_tickers": ("MU", "META"),
+            "alpha_vantage_selection_reasons": {
+                "MU": ("portfolio", "weak_coverage"),
+                "META": ("weak_coverage", "google_dominated"),
+            },
+            "weak_coverage_tickers": ("META", "MU"),
+            "history_status": "compared_to_prior_run",
+            "new_events_since_prior_run": 4,
+            "repeated_events_from_prior_run": 2,
+            "sentiment_change_since_prior_run": {
+                "NVDA": {
+                    "prior": 0.1,
+                    "current": 0.225,
+                    "change": 0.125,
+                },
+            },
         },
     )
 

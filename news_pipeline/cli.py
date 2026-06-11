@@ -41,7 +41,10 @@ from .email_sender import (
 )
 from .environment import environment_status, load_cli_environment
 from .event_memory import (
+    alpha_vantage_selection_history,
     build_event_memory_records,
+    compare_event_memory,
+    load_latest_prior_event_memory,
     sec_event_candidate_rows,
     write_event_memory_artifacts,
 )
@@ -289,6 +292,17 @@ def main(
         database_path = output_dir / "news_pipeline.sqlite3"
         store = initialize_database(database_path)
         try:
+            prior_event_memory = load_latest_prior_event_memory(
+                runs_dir=output_dir.parent,
+                run_date=args.run_date,
+            )
+            alpha_selection_history = alpha_vantage_selection_history(
+                prior_event_memory,
+                minimum_articles_per_ticker=max(
+                    1,
+                    int(args.minimum_articles_per_ticker),
+                ),
+            )
             store.reset_run(run_id)
             provider_results = _provider_validation_results(
                 args,
@@ -312,6 +326,7 @@ def main(
                 store,
                 run_id,
                 environ=runtime_environ,
+                alpha_vantage_history=alpha_selection_history,
             )
             source_quality_filter = filter_articles_by_source_quality(
                 collected_articles,
@@ -440,9 +455,17 @@ def main(
             )
             for record in event_memory_records:
                 store.record_event_memory(record.as_dict())
+            event_memory_comparison = compare_event_memory(
+                event_memory_records,
+                prior_event_memory,
+            )
             event_memory_json, event_memory_csv = write_event_memory_artifacts(
                 event_memory_records,
                 output_dir=output_dir,
+            )
+            event_memory_comparison_path = _write_json(
+                output_dir / "event_memory_comparison.json",
+                event_memory_comparison.as_dict(),
             )
             sec_candidates = sec_event_candidate_rows(post_dedup_articles)
             sec_event_counts: dict[str, int] = {}
@@ -455,6 +478,7 @@ def main(
                         sorted(sec_event_counts.items())
                     ),
                     "event_memory_records_written": len(event_memory_records),
+                    **event_memory_comparison.as_dict(),
                 }
             )
 
@@ -595,6 +619,39 @@ def main(
             ),
             "event_memory_json": event_memory_json,
             "event_memory_csv": event_memory_csv,
+            "event_memory_comparison": event_memory_comparison_path,
+            "alpha_vantage_selected_tickers": live_rss_summary.get(
+                "alpha_vantage_selected_tickers",
+                [],
+            ),
+            "alpha_vantage_selection_reasons": live_rss_summary.get(
+                "alpha_vantage_selection_reasons",
+                {},
+            ),
+            "weak_coverage_tickers": live_rss_summary.get(
+                "weak_coverage_tickers",
+                [],
+            ),
+            "prior_run_available": live_rss_summary.get(
+                "prior_run_available",
+                False,
+            ),
+            "history_status": live_rss_summary.get(
+                "history_status",
+                "history_building",
+            ),
+            "new_events_since_prior_run": live_rss_summary.get(
+                "new_events_since_prior_run",
+                0,
+            ),
+            "repeated_events_from_prior_run": live_rss_summary.get(
+                "repeated_events_from_prior_run",
+                0,
+            ),
+            "sentiment_change_since_prior_run": live_rss_summary.get(
+                "sentiment_change_since_prior_run",
+                {},
+            ),
             "extraction_queue_size": article_fetch_summary.extraction_queue_size,
             "extraction_selected_count": article_fetch_summary.extraction_selected_count,
             "extraction_skipped_count": article_fetch_summary.extraction_skipped_count,
@@ -1157,6 +1214,7 @@ def _collect_daily_articles(
     run_id: str,
     *,
     environ: Mapping[str, str] | None = None,
+    alpha_vantage_history: Mapping[str, object] | None = None,
 ) -> tuple[list[Article], dict[str, object]]:
     articles = (
         _collect_articles(args, fake_providers)
@@ -1234,10 +1292,18 @@ def _collect_daily_articles(
             ),
             "alpha_vantage_news_effective_endpoint_without_key": None,
             "alpha_vantage_news_effective_params_without_key": {},
+            "alpha_vantage_selected_tickers": [],
+            "alpha_vantage_selection_reasons": {},
+            "weak_coverage_tickers": [],
             "alpha_vantage_benchmark_coverage_by_ticker": {},
             "alpha_vantage_benchmark_disagreement_count": 0,
             "sec_event_candidates_by_form_type": {},
             "event_memory_records_written": 0,
+            "prior_run_available": False,
+            "history_status": "history_building",
+            "new_events_since_prior_run": 0,
+            "repeated_events_from_prior_run": 0,
+            "sentiment_change_since_prior_run": {},
             "ticker_coverage_status": {},
             "google_dependence_by_ticker": {},
             "direct_or_api_coverage_by_ticker": {},
@@ -1320,6 +1386,7 @@ def _collect_daily_articles(
                 int(args.target_articles_per_ticker),
             ),
             environ=environ,
+            alpha_vantage_history=alpha_vantage_history,
         )
         live_articles = list(schedule.articles)
         attempts = list(schedule.attempts)
@@ -1492,10 +1559,18 @@ def _direct_source_diagnostics(
         ),
         "alpha_vantage_news_effective_endpoint_without_key": None,
         "alpha_vantage_news_effective_params_without_key": {},
+        "alpha_vantage_selected_tickers": [],
+        "alpha_vantage_selection_reasons": {},
+        "weak_coverage_tickers": [],
         "alpha_vantage_benchmark_coverage_by_ticker": {},
         "alpha_vantage_benchmark_disagreement_count": 0,
         "sec_event_candidates_by_form_type": {},
         "event_memory_records_written": 0,
+        "prior_run_available": False,
+        "history_status": "history_building",
+        "new_events_since_prior_run": 0,
+        "repeated_events_from_prior_run": 0,
+        "sentiment_change_since_prior_run": {},
         "ticker_coverage_status": {},
         "google_dependence_by_ticker": {},
         "direct_or_api_coverage_by_ticker": {},
@@ -2874,6 +2949,28 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
     warnings = " ".join(report.report_warnings) or "none"
     backend = report.backend_article_pool_summary
     email = report.email_display_summary
+    alpha_selection_reasons = "; ".join(
+        f"{ticker}: {', '.join(str(reason) for reason in reasons)}"
+        for ticker, reasons in sorted(
+            (
+                report.source_coverage_diagnostics.get(
+                    "alpha_vantage_selection_reasons"
+                )
+                or {}
+            ).items()
+        )
+    )
+    sentiment_changes = "; ".join(
+        f"{ticker}: {float(values.get('change', 0.0)):+.4f}"
+        for ticker, values in sorted(
+            (
+                report.source_coverage_diagnostics.get(
+                    "sentiment_change_since_prior_run"
+                )
+                or {}
+            ).items()
+        )
+    )
     return [
         "## Source and Extraction Diagnostics",
         "",
@@ -2937,6 +3034,21 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
         f"{_escape_markdown(str(report.source_coverage_diagnostics.get('nyt_status_code') or report.source_coverage_diagnostics.get('nyt_role') or 'context_news_api'))} | "
         f"{_escape_markdown(str(report.source_coverage_diagnostics.get('nyt_error_reason') or 'none'))}; "
         f"zero-result queries: {int(report.source_coverage_diagnostics.get('nyt_zero_result_queries', 0))} |",
+        "",
+        "### Alpha Vantage Allocation and Event History",
+        "",
+        "| Selected Tickers | Weak Coverage Tickers | History Status | New Events | Repeated Events | Sentiment Changes |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
+        f"| {_escape_markdown(', '.join(report.source_coverage_diagnostics.get('alpha_vantage_selected_tickers') or ()) or 'none')} | "
+        f"{_escape_markdown(', '.join(report.source_coverage_diagnostics.get('weak_coverage_tickers') or ()) or 'none')} | "
+        f"{_escape_markdown(str(report.source_coverage_diagnostics.get('history_status') or 'history_building'))} | "
+        f"{int(report.source_coverage_diagnostics.get('new_events_since_prior_run', 0))} | "
+        f"{int(report.source_coverage_diagnostics.get('repeated_events_from_prior_run', 0))} | "
+        f"{len(report.source_coverage_diagnostics.get('sentiment_change_since_prior_run') or {})} |",
+        "",
+        f"Alpha selection reasons: {_escape_markdown(alpha_selection_reasons or 'none')}",
+        "",
+        f"Sentiment changes since prior run: {_escape_markdown(sentiment_changes or 'none')}",
         "",
         "### Source Quality Summary",
         "",

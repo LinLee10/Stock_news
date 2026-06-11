@@ -108,6 +108,7 @@ def schedule_sources(
     minimum_articles_per_ticker: int = 5,
     target_articles_per_ticker: int = 15,
     external_fetch_json: HttpJsonFetcher | None = None,
+    alpha_vantage_history: Mapping[str, object] | None = None,
 ) -> SourceScheduleResult:
     environ = environ or {}
     legacy_provider_flags = dict(paid_provider_flags or {})
@@ -168,6 +169,9 @@ def schedule_sources(
             ),
             "alpha_vantage_news_effective_endpoint_without_key": None,
             "alpha_vantage_news_effective_params_without_key": {},
+            "alpha_vantage_selected_tickers": [],
+            "alpha_vantage_selection_reasons": {},
+            "weak_coverage_tickers": [],
             "gnews_status_code": None,
             "gnews_error_reason": None,
             "gnews_requests_attempted": 0,
@@ -289,6 +293,24 @@ def schedule_sources(
                         EXTERNAL_GENERAL_NEWS_API,
                     }
                 }
+                current_direct_coverage = _ticker_coverage_counts(
+                    _unique_articles(articles),
+                    tracked_tickers,
+                    include_google=False,
+                )
+                history = dict(alpha_vantage_history or {})
+                historical_weak = {
+                    str(ticker).upper()
+                    for ticker in (
+                        history.get("weak_coverage_tickers") or ()
+                    )
+                }
+                current_weak = {
+                    ticker.symbol
+                    for ticker in tracked_tickers
+                    if current_direct_coverage.get(ticker.symbol, 0)
+                    < max(1, minimum_articles_per_ticker)
+                }
                 external_result = collect_external_api_articles(
                     profiles=external_profiles,
                     query_plans=query_plans,
@@ -301,6 +323,17 @@ def schedule_sources(
                     run_date=run_date,
                     timeout_seconds=timeout_seconds,
                     fetch_json=external_fetch_json,
+                    alpha_vantage_selection_context={
+                        "weak_coverage_tickers": sorted(
+                            current_weak | historical_weak
+                        ),
+                        "google_dominated_tickers": list(
+                            history.get("google_dominated_tickers") or ()
+                        ),
+                        "benchmark_coverage_counts": dict(
+                            history.get("benchmark_coverage_counts") or {}
+                        ),
+                    },
                 )
                 articles.extend(external_result.articles)
                 attempts.extend(_external_attempt_rows(external_result))

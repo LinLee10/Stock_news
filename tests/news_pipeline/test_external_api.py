@@ -6,6 +6,7 @@ from news_pipeline.sources.external_api import (
     balance_external_sentiment_articles,
     build_external_quality_diagnostics,
     collect_external_api_articles,
+    select_alpha_vantage_query_plans,
 )
 from news_pipeline.sources.query_planner import plan_ticker_queries
 from news_pipeline.sources.source_registry import load_source_profiles
@@ -13,6 +14,9 @@ from news_pipeline.tickers import TrackedTicker
 
 
 NVDA = TrackedTicker("NVDA", "NVIDIA", ("Nvidia",), "portfolio")
+MU = TrackedTicker("MU", "Micron Technology", ("Micron",), "portfolio")
+META = TrackedTicker("META", "Meta Platforms", ("Meta",), "watchlist")
+ACHR = TrackedTicker("ACHR", "Archer Aviation", ("Archer",), "watchlist")
 
 
 def _profiles():
@@ -56,6 +60,44 @@ def _collect(*, flags, environ, total=5, budgets=None, fetch_json=None):
 
 
 class ExternalApiTests(unittest.TestCase):
+    def test_alpha_vantage_selection_prioritizes_weak_coverage_over_alphabetical_order(self):
+        tickers = (ACHR, META, MU, NVDA)
+        selected, reasons = select_alpha_vantage_query_plans(
+            plan_ticker_queries(tickers),
+            tracked_tickers=tickers,
+            budget=2,
+            selection_context={
+                "weak_coverage_tickers": ["MU", "META"],
+                "google_dominated_tickers": ["META"],
+                "benchmark_coverage_counts": {
+                    "ACHR": 0,
+                    "META": 0,
+                    "MU": 0,
+                    "NVDA": 10,
+                },
+            },
+        )
+
+        self.assertEqual([plan.ticker for plan in selected], ["MU", "META"])
+        self.assertIn("weak_coverage", reasons["MU"])
+        self.assertIn("known_coverage_gap", reasons["MU"])
+        self.assertIn("google_dominated", reasons["META"])
+        self.assertIn("few_benchmark_records", reasons["META"])
+        self.assertIn("known_coverage_gap", reasons["META"])
+
+    def test_alpha_vantage_selection_prioritizes_portfolio_ticker(self):
+        selected, reasons = select_alpha_vantage_query_plans(
+            plan_ticker_queries((ACHR, NVDA)),
+            tracked_tickers=(ACHR, NVDA),
+            budget=1,
+            selection_context={
+                "benchmark_coverage_counts": {"ACHR": 5, "NVDA": 5},
+            },
+        )
+
+        self.assertEqual([plan.ticker for plan in selected], ["NVDA"])
+        self.assertEqual(reasons["NVDA"], ["portfolio"])
+
     def test_alpha_vantage_news_is_disabled_without_provider_flag(self):
         calls = []
         result = _collect(

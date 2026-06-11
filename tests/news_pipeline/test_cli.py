@@ -300,6 +300,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(sentiments), payload["score_count"])
             self.assertTrue(any(row["ticker"] == "NVDA" for row in mentions))
             self.assertTrue(all(row["full_text"] is None for row in all_articles))
+            self.assertFalse(payload["prior_run_available"])
+            self.assertEqual(payload["history_status"], "history_building")
+            self.assertTrue(Path(payload["event_memory_comparison"]).exists())
+
+    def test_dry_run_daily_compares_event_memory_to_prior_dated_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first = json.loads(
+                _run_cli(
+                    "dry-run-daily",
+                    temp_dir,
+                    extra_args=["--run-date", "2026-06-02"],
+                )
+            )
+            second = json.loads(_run_cli("dry-run-daily", temp_dir))
+
+            self.assertFalse(first["prior_run_available"])
+            self.assertTrue(second["prior_run_available"])
+            self.assertEqual(second["history_status"], "compared_to_prior_run")
+            self.assertEqual(second["new_events_since_prior_run"], 0)
+            self.assertGreater(second["repeated_events_from_prior_run"], 0)
+            self.assertEqual(second["sentiment_change_since_prior_run"], {})
 
     def test_dry_run_daily_same_date_is_idempotent_in_sqlite(self):
         with tempfile.TemporaryDirectory() as temp_dir:

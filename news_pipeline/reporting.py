@@ -739,6 +739,18 @@ def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
     email = report_input.email_display_summary
     confidence = report_input.ticker_match_confidence_summary
     diagnostics = report_input.source_coverage_diagnostics
+    selection_reasons = "; ".join(
+        f"{ticker}: {', '.join(str(reason) for reason in reasons)}"
+        for ticker, reasons in sorted(
+            (diagnostics.get("alpha_vantage_selection_reasons") or {}).items()
+        )
+    )
+    sentiment_changes = "; ".join(
+        f"{ticker}: {float(values.get('change', 0.0)):+.4f}"
+        for ticker, values in sorted(
+            (diagnostics.get("sentiment_change_since_prior_run") or {}).items()
+        )
+    )
     return "\n".join(
         [
             "  <h2>Backend and Email Pool Summary</h2>",
@@ -764,6 +776,19 @@ def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
             f"<td class=\"num\">{int(diagnostics.get('event_memory_records_written', 0))}</td>"
             "</tr>",
             "  </table>",
+            "  <table>",
+            "    <tr><th>Alpha Selected Tickers</th><th>Weak Coverage Tickers</th><th>History Status</th><th>New Events</th><th>Repeated Events</th><th>Sentiment Changes</th></tr>",
+            "    <tr>"
+            f"<td>{escape(', '.join(diagnostics.get('alpha_vantage_selected_tickers') or ()) or 'none')}</td>"
+            f"<td>{escape(', '.join(diagnostics.get('weak_coverage_tickers') or ()) or 'none')}</td>"
+            f"<td>{escape(str(diagnostics.get('history_status') or 'history_building'))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('new_events_since_prior_run', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('repeated_events_from_prior_run', 0))}</td>"
+            f"<td class=\"num\">{len(diagnostics.get('sentiment_change_since_prior_run') or {})}</td>"
+            "</tr>",
+            "  </table>",
+            f"  <p><strong>Alpha selection reasons:</strong> {escape(selection_reasons or 'none')}</p>",
+            f"  <p><strong>Sentiment changes since prior run:</strong> {escape(sentiment_changes or 'none')}</p>",
             "  <table>",
             "    <tr><th>Ticker Match Confidence</th><th>Count</th></tr>",
             f"    <tr><td>High</td><td class=\"num\">{int(confidence.get('high_confidence_matches', 0))}</td></tr>",
