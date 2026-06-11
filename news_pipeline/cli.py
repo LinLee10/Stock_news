@@ -41,6 +41,7 @@ from .email_sender import (
 )
 from .environment import environment_status, load_cli_environment
 from .event_memory import (
+    DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
     alpha_vantage_selection_history,
     build_event_memory_records,
     compare_event_memory,
@@ -295,6 +296,10 @@ def main(
             prior_event_memory = load_latest_prior_event_memory(
                 runs_dir=output_dir.parent,
                 run_date=args.run_date,
+                lookback_days=max(
+                    1,
+                    int(args.event_memory_lookback_days),
+                ),
             )
             alpha_selection_history = alpha_vantage_selection_history(
                 prior_event_memory,
@@ -458,6 +463,10 @@ def main(
             event_memory_comparison = compare_event_memory(
                 event_memory_records,
                 prior_event_memory,
+                lookback_days=max(
+                    1,
+                    int(args.event_memory_lookback_days),
+                ),
             )
             event_memory_json, event_memory_csv = write_event_memory_artifacts(
                 event_memory_records,
@@ -636,6 +645,18 @@ def main(
                 "prior_run_available",
                 False,
             ),
+            "event_memory_lookback_days": live_rss_summary.get(
+                "event_memory_lookback_days",
+                max(1, int(args.event_memory_lookback_days)),
+            ),
+            "prior_runs_considered": live_rss_summary.get(
+                "prior_runs_considered",
+                [],
+            ),
+            "prior_event_records_considered": live_rss_summary.get(
+                "prior_event_records_considered",
+                0,
+            ),
             "history_status": live_rss_summary.get(
                 "history_status",
                 "history_building",
@@ -647,6 +668,40 @@ def main(
             "repeated_events_from_prior_run": live_rss_summary.get(
                 "repeated_events_from_prior_run",
                 0,
+            ),
+            "exact_repeated_events_from_prior_run": live_rss_summary.get(
+                "exact_repeated_events_from_prior_run",
+                0,
+            ),
+            "fuzzy_repeated_events_from_prior_run": live_rss_summary.get(
+                "fuzzy_repeated_events_from_prior_run",
+                0,
+            ),
+            "event_identity_method_counts": live_rss_summary.get(
+                "event_identity_method_counts",
+                {},
+            ),
+            "event_similarity_threshold": live_rss_summary.get(
+                "event_similarity_threshold",
+                0.0,
+            ),
+            "exact_url_repeat": live_rss_summary.get(
+                "exact_url_repeat",
+                live_rss_summary.get(
+                    "exact_repeated_events_from_prior_run",
+                    0,
+                ),
+            ),
+            "fuzzy_event_repeat": live_rss_summary.get(
+                "fuzzy_event_repeat",
+                live_rss_summary.get(
+                    "fuzzy_repeated_events_from_prior_run",
+                    0,
+                ),
+            ),
+            "likely_new_event": live_rss_summary.get(
+                "likely_new_event",
+                live_rss_summary.get("new_events_since_prior_run", 0),
             ),
             "sentiment_change_since_prior_run": live_rss_summary.get(
                 "sentiment_change_since_prior_run",
@@ -881,6 +936,11 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--minimum-backend-articles", type=int, default=150)
     parser.add_argument("--target-articles-per-ticker", type=int, default=15)
     parser.add_argument("--minimum-articles-per-ticker", type=int, default=5)
+    parser.add_argument(
+        "--event-memory-lookback-days",
+        type=int,
+        default=DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
+    )
     parser.add_argument("--max-email-stories", type=int, default=DEFAULT_MAX_EMAIL_STORIES)
     parser.add_argument(
         "--max-ranked-reads-per-ticker",
@@ -1300,9 +1360,20 @@ def _collect_daily_articles(
             "sec_event_candidates_by_form_type": {},
             "event_memory_records_written": 0,
             "prior_run_available": False,
+            "event_memory_lookback_days": DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
+            "prior_runs_considered": [],
+            "prior_event_records_considered": 0,
             "history_status": "history_building",
             "new_events_since_prior_run": 0,
             "repeated_events_from_prior_run": 0,
+            "exact_repeated_events_from_prior_run": 0,
+            "fuzzy_repeated_events_from_prior_run": 0,
+            "event_identity_method_counts": {
+                "exact_url_repeat": 0,
+                "fuzzy_event_repeat": 0,
+                "likely_new_event": 0,
+            },
+            "event_similarity_threshold": 0.0,
             "sentiment_change_since_prior_run": {},
             "ticker_coverage_status": {},
             "google_dependence_by_ticker": {},
@@ -1567,9 +1638,20 @@ def _direct_source_diagnostics(
         "sec_event_candidates_by_form_type": {},
         "event_memory_records_written": 0,
         "prior_run_available": False,
+        "event_memory_lookback_days": DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
+        "prior_runs_considered": [],
+        "prior_event_records_considered": 0,
         "history_status": "history_building",
         "new_events_since_prior_run": 0,
         "repeated_events_from_prior_run": 0,
+        "exact_repeated_events_from_prior_run": 0,
+        "fuzzy_repeated_events_from_prior_run": 0,
+        "event_identity_method_counts": {
+            "exact_url_repeat": 0,
+            "fuzzy_event_repeat": 0,
+            "likely_new_event": 0,
+        },
+        "event_similarity_threshold": 0.0,
         "sentiment_change_since_prior_run": {},
         "ticker_coverage_status": {},
         "google_dependence_by_ticker": {},
@@ -3037,14 +3119,21 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
         "",
         "### Alpha Vantage Allocation and Event History",
         "",
-        "| Selected Tickers | Weak Coverage Tickers | History Status | New Events | Repeated Events | Sentiment Changes |",
-        "| --- | --- | --- | ---: | ---: | ---: |",
+        "| Selected Tickers | Weak Coverage Tickers | History Status | New Events | Exact URL Repeats | Fuzzy Repeats | Sentiment Changes |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
         f"| {_escape_markdown(', '.join(report.source_coverage_diagnostics.get('alpha_vantage_selected_tickers') or ()) or 'none')} | "
         f"{_escape_markdown(', '.join(report.source_coverage_diagnostics.get('weak_coverage_tickers') or ()) or 'none')} | "
         f"{_escape_markdown(str(report.source_coverage_diagnostics.get('history_status') or 'history_building'))} | "
         f"{int(report.source_coverage_diagnostics.get('new_events_since_prior_run', 0))} | "
-        f"{int(report.source_coverage_diagnostics.get('repeated_events_from_prior_run', 0))} | "
+        f"{int(report.source_coverage_diagnostics.get('exact_repeated_events_from_prior_run', 0))} | "
+        f"{int(report.source_coverage_diagnostics.get('fuzzy_repeated_events_from_prior_run', 0))} | "
         f"{len(report.source_coverage_diagnostics.get('sentiment_change_since_prior_run') or {})} |",
+        "",
+        f"Event identity methods: {_escape_markdown(str(report.source_coverage_diagnostics.get('event_identity_method_counts') or {}))}; "
+        f"similarity threshold: {float(report.source_coverage_diagnostics.get('event_similarity_threshold', 0.0)):.2f}; "
+        f"lookback days: {int(report.source_coverage_diagnostics.get('event_memory_lookback_days', DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS))}; "
+        f"prior runs: {len(report.source_coverage_diagnostics.get('prior_runs_considered') or ())}; "
+        f"prior records: {int(report.source_coverage_diagnostics.get('prior_event_records_considered', 0))}",
         "",
         f"Alpha selection reasons: {_escape_markdown(alpha_selection_reasons or 'none')}",
         "",

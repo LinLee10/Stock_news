@@ -45,7 +45,8 @@ The production pipeline currently includes:
 19. Diagnostic artifacts and a report contract.
 20. SQLite and artifact-backed event memory.
 21. Coverage-aware Alpha Vantage benchmark allocation.
-22. First-pass comparison with event memory from the latest prior dated run.
+22. Configurable comparison with event memory from multiple prior dated runs.
+23. Cross-run exact and fuzzy event identity matching.
 
 ## API And Source State
 
@@ -97,21 +98,29 @@ source-layer risks include:
   benchmark coverage and Google-dependence signals. A first-ever run has less
   historical evidence and must bootstrap from portfolio priority, current
   coverage gaps, and known weak-coverage names.
-- Historical event identity currently uses ticker plus canonical URL. It does
-  not yet recognize a recurring event when publishers or URLs change.
+- Cross-run event identity uses exact ticker/canonical-URL matching first, then
+  bounded fuzzy title matching for the same ticker within a configurable
+  publication window. The default lookback is three days. Generic or weak
+  titles can still produce uncertain classifications.
 
 The Alpha Vantage News Sentiment benchmark and initial durable event memory are
 implemented in the current worktree. Alpha Vantage request allocation now
 prioritizes portfolio names, weak-coverage names, Google-dominated names, and
 tickers with few prior benchmark records instead of relying on alphabetical
-order. Reports compare the current event-memory records with the latest prior
-dated run when available and report `history_building` cleanly otherwise.
+order. Reports compare current event-memory records with every completed prior
+dated run inside the configured lookback and report `history_building` cleanly
+when none exist.
+Event-memory records retain the original event title, a normalized title,
+publication date bucket, and a deterministic identity fingerprint containing
+ticker, title, event and article types, company, source family, and date.
+Comparison diagnostics distinguish exact URL repeats, fuzzy event repeats, and
+likely new events.
 
-The next recommended phase is to improve cross-run event identity beyond exact
-canonical URLs, add multi-run sentiment trend summaries and benchmark
-calibration, validate retention and schema migration behavior over a longer
-history, and consider deeper SEC filing parsing as a separately scoped future
-phase.
+The next recommended phase is to calibrate fuzzy identity thresholds and
+lookback duration from labeled multi-run examples, consolidate duplicate prior
+events before sentiment baselining, add multi-run sentiment trend summaries and
+benchmark calibration, and consider deeper SEC filing parsing as a separately
+scoped future phase.
 
 ## Event And Sentiment Memory
 
@@ -131,8 +140,14 @@ historical records. Durable records currently target:
 - Event summary.
 - Run ID and run date.
 
-The first historical comparison reads the latest earlier dated run database in
-read-only mode. It records new and repeated ticker/URL events and per-ticker
+Historical comparison reads all earlier dated run databases inside a bounded
+lookback in read-only mode. The CLI flag `--event-memory-lookback-days`
+controls the window and defaults to three days. Canonical URL equality for the
+same ticker is resolved across all prior records before fuzzy matching.
+Otherwise, normalized titles may match only when the ticker is the same and
+publication dates fall inside the lookback. The current similarity threshold,
+prior runs, and prior record count are reported in diagnostics. Comparisons
+record exact URL repeats, fuzzy repeats, likely new events, and per-ticker
 changes in average internal sentiment. Same-day reruns are intentionally not
 treated as an earlier reporting period.
 

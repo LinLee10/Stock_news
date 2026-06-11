@@ -302,11 +302,29 @@ class CliTests(unittest.TestCase):
             self.assertTrue(all(row["full_text"] is None for row in all_articles))
             self.assertFalse(payload["prior_run_available"])
             self.assertEqual(payload["history_status"], "history_building")
-            self.assertTrue(Path(payload["event_memory_comparison"]).exists())
+            comparison_path = Path(payload["event_memory_comparison"])
+            self.assertTrue(comparison_path.exists())
+            comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                comparison["event_identity_method_counts"],
+                {
+                    "exact_url_repeat": 0,
+                    "fuzzy_event_repeat": 0,
+                    "likely_new_event": 0,
+                },
+            )
+            self.assertIn("event_similarity_threshold", comparison)
 
     def test_dry_run_daily_compares_event_memory_to_prior_dated_run(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             first = json.loads(
+                _run_cli(
+                    "dry-run-daily",
+                    temp_dir,
+                    extra_args=["--run-date", "2026-06-01"],
+                )
+            )
+            middle = json.loads(
                 _run_cli(
                     "dry-run-daily",
                     temp_dir,
@@ -316,10 +334,25 @@ class CliTests(unittest.TestCase):
             second = json.loads(_run_cli("dry-run-daily", temp_dir))
 
             self.assertFalse(first["prior_run_available"])
+            self.assertTrue(middle["prior_run_available"])
             self.assertTrue(second["prior_run_available"])
             self.assertEqual(second["history_status"], "compared_to_prior_run")
+            self.assertEqual(second["event_memory_lookback_days"], 3)
+            self.assertEqual(
+                [row["run_date"] for row in second["prior_runs_considered"]],
+                ["2026-06-02", "2026-06-01"],
+            )
+            self.assertGreater(second["prior_event_records_considered"], 0)
             self.assertEqual(second["new_events_since_prior_run"], 0)
             self.assertGreater(second["repeated_events_from_prior_run"], 0)
+            self.assertGreater(
+                second["exact_repeated_events_from_prior_run"],
+                0,
+            )
+            self.assertEqual(
+                second["event_identity_method_counts"]["likely_new_event"],
+                0,
+            )
             self.assertEqual(second["sentiment_change_since_prior_run"], {})
 
     def test_dry_run_daily_same_date_is_idempotent_in_sqlite(self):

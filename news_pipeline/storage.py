@@ -189,6 +189,10 @@ class SQLiteStore:
                 external_sentiment_provider TEXT,
                 external_sentiment REAL,
                 event_type TEXT NOT NULL,
+                event_title TEXT NOT NULL DEFAULT '',
+                normalized_event_title TEXT NOT NULL DEFAULT '',
+                published_date_bucket TEXT,
+                event_identity_fingerprint TEXT NOT NULL DEFAULT '',
                 event_summary TEXT NOT NULL,
                 run_id TEXT NOT NULL,
                 run_date TEXT NOT NULL,
@@ -216,6 +220,18 @@ class SQLiteStore:
         self._ensure_column("article_extractions", "extraction_method_used", "TEXT")
         self._ensure_column("article_extractions", "extraction_failure_reason", "TEXT")
         self._ensure_column("article_extractions", "tickers_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("event_memory", "event_title", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column(
+            "event_memory",
+            "normalized_event_title",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        self._ensure_column("event_memory", "published_date_bucket", "TEXT")
+        self._ensure_column(
+            "event_memory",
+            "event_identity_fingerprint",
+            "TEXT NOT NULL DEFAULT ''",
+        )
         self.connection.commit()
 
     def reset_run(self, run_id: str) -> None:
@@ -576,6 +592,10 @@ class SQLiteStore:
             "external_sentiment_provider",
             "external_sentiment",
             "event_type",
+            "event_title",
+            "normalized_event_title",
+            "published_date_bucket",
+            "event_identity_fingerprint",
             "event_summary",
             "run_id",
             "run_date",

@@ -777,16 +777,23 @@ def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
             "</tr>",
             "  </table>",
             "  <table>",
-            "    <tr><th>Alpha Selected Tickers</th><th>Weak Coverage Tickers</th><th>History Status</th><th>New Events</th><th>Repeated Events</th><th>Sentiment Changes</th></tr>",
+            "    <tr><th>Alpha Selected Tickers</th><th>Weak Coverage Tickers</th><th>History Status</th><th>New Events</th><th>Exact URL Repeats</th><th>Fuzzy Repeats</th><th>Sentiment Changes</th></tr>",
             "    <tr>"
             f"<td>{escape(', '.join(diagnostics.get('alpha_vantage_selected_tickers') or ()) or 'none')}</td>"
             f"<td>{escape(', '.join(diagnostics.get('weak_coverage_tickers') or ()) or 'none')}</td>"
             f"<td>{escape(str(diagnostics.get('history_status') or 'history_building'))}</td>"
             f"<td class=\"num\">{int(diagnostics.get('new_events_since_prior_run', 0))}</td>"
-            f"<td class=\"num\">{int(diagnostics.get('repeated_events_from_prior_run', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('exact_repeated_events_from_prior_run', 0))}</td>"
+            f"<td class=\"num\">{int(diagnostics.get('fuzzy_repeated_events_from_prior_run', 0))}</td>"
             f"<td class=\"num\">{len(diagnostics.get('sentiment_change_since_prior_run') or {})}</td>"
             "</tr>",
             "  </table>",
+            "  <p><strong>Event identity methods:</strong> "
+            f"{escape(str(diagnostics.get('event_identity_method_counts') or {}))}; "
+            f"similarity threshold: {float(diagnostics.get('event_similarity_threshold', 0.0)):.2f}; "
+            f"lookback days: {int(diagnostics.get('event_memory_lookback_days', 3))}; "
+            f"prior runs: {len(diagnostics.get('prior_runs_considered') or ())}; "
+            f"prior records: {int(diagnostics.get('prior_event_records_considered', 0))}</p>",
             f"  <p><strong>Alpha selection reasons:</strong> {escape(selection_reasons or 'none')}</p>",
             f"  <p><strong>Sentiment changes since prior run:</strong> {escape(sentiment_changes or 'none')}</p>",
             "  <table>",

@@ -6,14 +6,20 @@ import unittest
 from news_pipeline.article_fetch import ArticleFetchSummary
 from news_pipeline.dedup import cluster_articles
 from news_pipeline.event_memory import (
+    DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
+    EVENT_SIMILARITY_THRESHOLD,
     EventMemoryRecord,
     PriorEventMemorySnapshot,
     alpha_vantage_selection_history,
     build_event_memory_records,
     compare_event_memory,
+    event_date_bucket,
+    event_identity_fingerprint,
+    load_latest_prior_event_memory,
+    normalize_event_title,
     write_event_memory_artifacts,
 )
-from news_pipeline.models import Article
+from news_pipeline.models import Article, RunResult, TickerMention
 from news_pipeline.storage import SQLiteStore
 
 
@@ -21,16 +27,30 @@ def _memory_record(
     ticker: str,
     canonical_url: str,
     sentiment: float,
+    *,
+    title: str = "Example event",
+    published_at: str = "2026-06-09T12:00:00Z",
+    company: str | None = None,
+    event_type: str = "company_news",
+    article_type: str = "company_news",
+    source_family: str = "direct_news_publisher",
 ) -> EventMemoryRecord:
+    company = company or ticker
+    normalized_title = normalize_event_title(
+        title,
+        ticker=ticker,
+        company=company,
+    )
+    date_bucket = event_date_bucket(published_at)
     return EventMemoryRecord(
         article_id=f"{ticker}-{canonical_url.rsplit('/', 1)[-1]}",
         canonical_url=canonical_url,
-        published_at="2026-06-09T12:00:00Z",
+        published_at=published_at,
         ticker=ticker,
-        company=ticker,
+        company=company,
         source_provider="example",
-        source_family="direct_news_publisher",
-        article_type="company_news",
+        source_family=source_family,
+        article_type=article_type,
         cluster_id=f"cluster-{ticker}",
         ticker_match_confidence=1.0,
         extraction_basis="snippet",
@@ -38,14 +58,63 @@ def _memory_record(
         internal_sentiment=sentiment,
         external_sentiment_provider=None,
         external_sentiment=None,
-        event_type="company_news",
+        event_type=event_type,
+        event_title=title,
+        normalized_event_title=normalized_title,
+        published_date_bucket=date_bucket,
+        event_identity_fingerprint=event_identity_fingerprint(
+            ticker=ticker,
+            normalized_title=normalized_title,
+            event_type=event_type,
+            article_type=article_type,
+            company=company,
+            source_family=source_family,
+            published_date_bucket=date_bucket,
+        ),
         event_summary="Example event",
         run_id="current-run",
         run_date="2026-06-09",
     )
 
 
+def _write_prior_run(
+    runs_dir: Path,
+    *,
+    run_date: str,
+    record: EventMemoryRecord,
+) -> None:
+    output_dir = runs_dir / run_date
+    output_dir.mkdir(parents=True, exist_ok=True)
+    store = SQLiteStore(output_dir / "news_pipeline.sqlite3")
+    try:
+        store.initialize_schema()
+        run_id = f"run-{run_date}"
+        store.record_run(
+            RunResult(run_id=run_id, status="completed"),
+            run_date=run_date,
+        )
+        store.record_event_memory(
+            {
+                **record.as_dict(),
+                "run_id": run_id,
+                "run_date": run_date,
+            }
+        )
+    finally:
+        store.close()
+
+
 class EventMemoryTests(unittest.TestCase):
+    def test_event_title_normalization_removes_filler_and_ticker_noise(self):
+        normalized = normalize_event_title(
+            "Breaking News: NVDA / NVIDIA Corporation Stock Update - "
+            "NVIDIA unveils Blackwell AI chips",
+            ticker="NVDA",
+            company="NVIDIA Corporation",
+        )
+
+        self.assertEqual(normalized, "launch blackwell ai chips")
+
     def test_no_prior_run_reports_history_building(self):
         comparison = compare_event_memory(
             (_memory_record("NVDA", "https://example.com/current", 0.2),),
@@ -56,9 +125,21 @@ class EventMemoryTests(unittest.TestCase):
         self.assertEqual(comparison.history_status, "history_building")
         self.assertEqual(comparison.new_events_since_prior_run, 0)
         self.assertEqual(comparison.repeated_events_from_prior_run, 0)
+        self.assertEqual(
+            comparison.event_identity_method_counts,
+            {
+                "exact_url_repeat": 0,
+                "fuzzy_event_repeat": 0,
+                "likely_new_event": 0,
+            },
+        )
+        self.assertEqual(
+            comparison.event_similarity_threshold,
+            EVENT_SIMILARITY_THRESHOLD,
+        )
         self.assertEqual(comparison.sentiment_change_since_prior_run, {})
 
-    def test_prior_run_comparison_counts_new_repeated_and_sentiment_changes(self):
+    def test_same_ticker_and_canonical_url_matches_exactly(self):
         prior = PriorEventMemorySnapshot(
             available=True,
             run_id="prior-run",
@@ -69,11 +150,6 @@ class EventMemoryTests(unittest.TestCase):
                     "https://example.com/repeated",
                     0.1,
                 ).as_dict(),
-                _memory_record(
-                    "AMD",
-                    "https://example.com/prior-only",
-                    -0.2,
-                ).as_dict(),
             ),
         )
         comparison = compare_event_memory(
@@ -83,23 +159,431 @@ class EventMemoryTests(unittest.TestCase):
                     "https://example.com/repeated",
                     0.4,
                 ),
-                _memory_record(
-                    "META",
-                    "https://example.com/new",
-                    0.3,
-                ),
             ),
             prior,
         )
 
         self.assertTrue(comparison.prior_run_available)
         self.assertEqual(comparison.history_status, "compared_to_prior_run")
-        self.assertEqual(comparison.new_events_since_prior_run, 1)
+        self.assertEqual(comparison.new_events_since_prior_run, 0)
         self.assertEqual(comparison.repeated_events_from_prior_run, 1)
+        self.assertEqual(comparison.exact_repeated_events_from_prior_run, 1)
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 0)
+        self.assertEqual(
+            comparison.event_identity_matches[0]["category"],
+            "exact_url_repeat",
+        )
         self.assertEqual(
             comparison.sentiment_change_since_prior_run["NVDA"]["change"],
             0.3,
         )
+
+    def test_same_ticker_different_url_similar_title_matches_fuzzily(self):
+        prior = PriorEventMemorySnapshot(
+            available=True,
+            records=(
+                _memory_record(
+                    "NVDA",
+                    "https://publisher-a.example.com/blackwell",
+                    0.1,
+                    title="NVIDIA launches new Blackwell AI chips for data centers",
+                    company="NVIDIA",
+                    published_at="2026-06-08T23:30:00Z",
+                    event_type="product_news",
+                    article_type="product_or_ai_or_chip_news",
+                ).as_dict(),
+            ),
+        )
+        comparison = compare_event_memory(
+            (
+                _memory_record(
+                    "NVDA",
+                    "https://publisher-b.example.com/nvidia-chip",
+                    0.2,
+                    title="Nvidia unveils Blackwell chips for AI data centers",
+                    company="NVIDIA",
+                    published_at="2026-06-09T08:00:00Z",
+                    event_type="product_news",
+                    article_type="product_or_ai_or_chip_news",
+                    source_family="external_market_news_api",
+                ),
+            ),
+            prior,
+        )
+
+        self.assertEqual(comparison.exact_repeated_events_from_prior_run, 0)
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 1)
+        self.assertEqual(comparison.new_events_since_prior_run, 0)
+        self.assertEqual(
+            comparison.event_identity_matches[0]["category"],
+            "fuzzy_event_repeat",
+        )
+        self.assertGreaterEqual(
+            comparison.event_identity_matches[0]["title_similarity"],
+            EVENT_SIMILARITY_THRESHOLD,
+        )
+        self.assertEqual(
+            comparison.event_memory_lookback_days,
+            DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
+        )
+
+    def test_different_ticker_with_similar_title_does_not_match(self):
+        prior = PriorEventMemorySnapshot(
+            available=True,
+            records=(
+                _memory_record(
+                    "AMD",
+                    "https://example.com/amd-chip",
+                    0.1,
+                    title="AMD launches new AI chip for data centers",
+                    company="Advanced Micro Devices",
+                ).as_dict(),
+            ),
+        )
+        comparison = compare_event_memory(
+            (
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/nvidia-chip",
+                    0.2,
+                    title="NVIDIA launches new AI chip for data centers",
+                    company="NVIDIA",
+                ),
+            ),
+            prior,
+        )
+
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 0)
+        self.assertEqual(comparison.new_events_since_prior_run, 1)
+
+    def test_same_ticker_with_unrelated_title_does_not_match(self):
+        prior = PriorEventMemorySnapshot(
+            available=True,
+            records=(
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/earnings",
+                    0.1,
+                    title="NVIDIA reports quarterly earnings and raises guidance",
+                    company="NVIDIA",
+                ).as_dict(),
+            ),
+        )
+        comparison = compare_event_memory(
+            (
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/product",
+                    0.2,
+                    title="NVIDIA launches robotics software platform",
+                    company="NVIDIA",
+                ),
+            ),
+            prior,
+        )
+
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 0)
+        self.assertEqual(comparison.new_events_since_prior_run, 1)
+
+    def test_three_day_lookback_matches_similar_event_across_different_urls(self):
+        prior = PriorEventMemorySnapshot(
+            available=True,
+            lookback_days=3,
+            records=(
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/prior-product",
+                    0.1,
+                    title="NVIDIA launches Blackwell AI chips for data centers",
+                    company="NVIDIA",
+                    published_at="2026-06-06T12:00:00Z",
+                ).as_dict(),
+            ),
+        )
+        comparison = compare_event_memory(
+            (
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/current-product",
+                    0.2,
+                    title="Nvidia unveils Blackwell chips for AI data centers",
+                    company="NVIDIA",
+                    published_at="2026-06-09T12:00:00Z",
+                ),
+            ),
+            prior,
+        )
+
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 1)
+        self.assertEqual(comparison.new_events_since_prior_run, 0)
+
+    def test_event_outside_lookback_is_not_matched(self):
+        prior = PriorEventMemorySnapshot(
+            available=True,
+            lookback_days=3,
+            records=(
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/prior-product",
+                    0.1,
+                    title="NVIDIA launches Blackwell AI chips for data centers",
+                    company="NVIDIA",
+                    published_at="2026-06-01T12:00:00Z",
+                ).as_dict(),
+            ),
+        )
+        comparison = compare_event_memory(
+            (
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/current-product",
+                    0.2,
+                    title="Nvidia unveils Blackwell chips for AI data centers",
+                    company="NVIDIA",
+                    published_at="2026-06-09T12:00:00Z",
+                ),
+            ),
+            prior,
+        )
+
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 0)
+        self.assertEqual(comparison.new_events_since_prior_run, 1)
+
+    def test_exact_url_match_wins_before_fuzzy_matching(self):
+        prior = PriorEventMemorySnapshot(
+            available=True,
+            records=(
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/exact",
+                    0.1,
+                    title="NVIDIA launches Blackwell AI chips for data centers",
+                    company="NVIDIA",
+                ).as_dict(),
+            ),
+        )
+        comparison = compare_event_memory(
+            (
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/fuzzy",
+                    0.2,
+                    title="Nvidia unveils Blackwell chips for AI data centers",
+                    company="NVIDIA",
+                ),
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/exact",
+                    0.3,
+                    title="NVIDIA executive comments on software demand",
+                    company="NVIDIA",
+                ),
+            ),
+            prior,
+        )
+
+        self.assertEqual(comparison.exact_repeated_events_from_prior_run, 1)
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 0)
+        self.assertEqual(comparison.new_events_since_prior_run, 1)
+        self.assertEqual(
+            comparison.event_identity_matches[1]["category"],
+            "exact_url_repeat",
+        )
+
+    def test_loader_considers_multiple_prior_runs_inside_lookback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runs_dir = Path(temp_dir) / "runs"
+            _write_prior_run(
+                runs_dir,
+                run_date="2026-06-08",
+                record=_memory_record(
+                    "NVDA",
+                    "https://example.com/june-8",
+                    0.1,
+                ),
+            )
+            _write_prior_run(
+                runs_dir,
+                run_date="2026-06-09",
+                record=_memory_record(
+                    "META",
+                    "https://example.com/june-9",
+                    0.2,
+                ),
+            )
+            _write_prior_run(
+                runs_dir,
+                run_date="2026-06-07",
+                record=_memory_record(
+                    "AMD",
+                    "https://example.com/outside-window",
+                    0.3,
+                ),
+            )
+
+            snapshot = load_latest_prior_event_memory(
+                runs_dir=runs_dir,
+                run_date="2026-06-11",
+                lookback_days=3,
+            )
+
+        self.assertTrue(snapshot.available)
+        self.assertEqual(
+            [run["run_date"] for run in snapshot.prior_runs],
+            ["2026-06-09", "2026-06-08"],
+        )
+        self.assertEqual(len(snapshot.records), 2)
+        self.assertEqual(
+            {record["_prior_run_date"] for record in snapshot.records},
+            {"2026-06-08", "2026-06-09"},
+        )
+
+    def test_loader_reconstructs_records_from_legacy_run_tables(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runs_dir = Path(temp_dir) / "runs"
+            output_dir = runs_dir / "2026-06-09"
+            output_dir.mkdir(parents=True)
+            store = SQLiteStore(output_dir / "news_pipeline.sqlite3")
+            try:
+                store.initialize_schema()
+                run_id = "run-2026-06-09"
+                store.record_run(
+                    RunResult(run_id=run_id, status="completed"),
+                    run_date="2026-06-09",
+                )
+                article = Article(
+                    article_id="legacy-nvda-story",
+                    canonical_url="https://example.com/legacy-nvda-story",
+                    title="NVIDIA launches Blackwell AI chips for data centers",
+                    snippet="NVIDIA announced a new data center chip.",
+                    published_at="2026-06-09T12:00:00Z",
+                )
+                article_id = store.add_run_article(run_id, article)
+                store.add_ticker_mention(
+                    TickerMention(
+                        article_id=article_id,
+                        ticker="NVDA",
+                        company_name="NVIDIA",
+                        confidence=0.95,
+                        basis="title",
+                    ),
+                    run_id=run_id,
+                )
+                store.connection.execute("DROP TABLE event_memory")
+                store.connection.commit()
+            finally:
+                store.close()
+
+            snapshot = load_latest_prior_event_memory(
+                runs_dir=runs_dir,
+                run_date="2026-06-11",
+                lookback_days=3,
+            )
+
+        self.assertTrue(snapshot.available)
+        self.assertEqual(len(snapshot.records), 1)
+        self.assertEqual(snapshot.records[0]["ticker"], "NVDA")
+        self.assertEqual(
+            snapshot.records[0]["comparison_title"],
+            "NVIDIA launches Blackwell AI chips for data centers",
+        )
+        self.assertEqual(
+            snapshot.prior_runs[0]["event_memory_basis"],
+            "legacy_run_tables",
+        )
+
+    def test_loader_reports_history_building_when_prior_runs_are_outside_lookback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runs_dir = Path(temp_dir) / "runs"
+            _write_prior_run(
+                runs_dir,
+                run_date="2026-06-07",
+                record=_memory_record(
+                    "NVDA",
+                    "https://example.com/outside-window",
+                    0.1,
+                ),
+            )
+
+            snapshot = load_latest_prior_event_memory(
+                runs_dir=runs_dir,
+                run_date="2026-06-11",
+                lookback_days=3,
+            )
+            comparison = compare_event_memory(
+                (
+                    _memory_record(
+                        "NVDA",
+                        "https://example.com/current",
+                        0.2,
+                        published_at="2026-06-11T12:00:00Z",
+                    ),
+                ),
+                snapshot,
+            )
+
+        self.assertFalse(snapshot.available)
+        self.assertEqual(comparison.history_status, "history_building")
+        self.assertEqual(comparison.prior_runs_considered, ())
+
+    def test_older_prior_run_can_supply_match_when_latest_cannot(self):
+        prior = PriorEventMemorySnapshot(
+            available=True,
+            run_id="run-2026-06-09",
+            run_date="2026-06-09",
+            lookback_days=3,
+            prior_runs=(
+                {"run_id": "run-2026-06-09", "run_date": "2026-06-09"},
+                {"run_id": "run-2026-06-08", "run_date": "2026-06-08"},
+            ),
+            records=(
+                {
+                    **_memory_record(
+                        "NVDA",
+                        "https://example.com/latest-unrelated",
+                        0.1,
+                        title="NVIDIA executive comments on software demand",
+                        company="NVIDIA",
+                        published_at="2026-06-09T12:00:00Z",
+                    ).as_dict(),
+                    "_prior_run_id": "run-2026-06-09",
+                    "_prior_run_date": "2026-06-09",
+                },
+                {
+                    **_memory_record(
+                        "NVDA",
+                        "https://example.com/older-related",
+                        0.2,
+                        title="NVIDIA launches Blackwell AI chips for data centers",
+                        company="NVIDIA",
+                        published_at="2026-06-08T12:00:00Z",
+                    ).as_dict(),
+                    "_prior_run_id": "run-2026-06-08",
+                    "_prior_run_date": "2026-06-08",
+                },
+            ),
+        )
+        comparison = compare_event_memory(
+            (
+                _memory_record(
+                    "NVDA",
+                    "https://example.com/current-related",
+                    0.3,
+                    title="Nvidia unveils Blackwell chips for AI data centers",
+                    company="NVIDIA",
+                    published_at="2026-06-11T12:00:00Z",
+                ),
+            ),
+            prior,
+        )
+
+        self.assertEqual(comparison.fuzzy_repeated_events_from_prior_run, 1)
+        self.assertEqual(
+            comparison.event_identity_matches[0]["prior_run_date"],
+            "2026-06-08",
+        )
+        self.assertEqual(len(comparison.prior_runs_considered), 2)
+        self.assertEqual(comparison.prior_event_records_considered, 2)
 
     def test_selection_history_identifies_google_dominance_and_benchmark_gaps(self):
         snapshot = PriorEventMemorySnapshot(
@@ -181,6 +665,10 @@ class EventMemoryTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].ticker, "NVDA")
         self.assertEqual(records[0].event_type, "material_event")
+        self.assertEqual(records[0].event_title, "NVIDIA files 8-K with the SEC")
+        self.assertEqual(records[0].published_date_bucket, "2026-06-09")
+        self.assertTrue(records[0].normalized_event_title)
+        self.assertEqual(len(records[0].event_identity_fingerprint), 64)
         with tempfile.TemporaryDirectory() as temp_dir:
             json_path, csv_path = write_event_memory_artifacts(
                 records,
@@ -199,6 +687,14 @@ class EventMemoryTests(unittest.TestCase):
                 store.close()
             self.assertEqual(len(stored), 1)
             self.assertEqual(stored[0]["event_type"], "material_event")
+            self.assertEqual(
+                stored[0]["normalized_event_title"],
+                records[0].normalized_event_title,
+            )
+            self.assertEqual(
+                stored[0]["event_identity_fingerprint"],
+                records[0].event_identity_fingerprint,
+            )
 
     def test_alpha_vantage_event_memory_uses_ticker_specific_sentiment(self):
         article = Article(

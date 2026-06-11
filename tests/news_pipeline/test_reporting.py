@@ -66,6 +66,12 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("Alpha selection reasons:", html)
             self.assertIn("MU: portfolio, weak_coverage", html)
             self.assertIn("compared_to_prior_run", html)
+            self.assertIn("Exact URL Repeats", html)
+            self.assertIn("Fuzzy Repeats", html)
+            self.assertIn("Event identity methods:", html)
+            self.assertIn("lookback days: 3", html)
+            self.assertIn("prior runs: 2", html)
+            self.assertIn("prior records: 42", html)
             self.assertIn("NVDA: +0.1250", html)
 
     def test_csv_attachment_contains_expected_rows(self):
@@ -206,6 +212,20 @@ def _fake_report_input() -> DailyReportInput:
             "history_status": "compared_to_prior_run",
             "new_events_since_prior_run": 4,
             "repeated_events_from_prior_run": 2,
+            "exact_repeated_events_from_prior_run": 1,
+            "fuzzy_repeated_events_from_prior_run": 1,
+            "event_identity_method_counts": {
+                "exact_url_repeat": 1,
+                "fuzzy_event_repeat": 1,
+                "likely_new_event": 4,
+            },
+            "event_similarity_threshold": 0.78,
+            "event_memory_lookback_days": 3,
+            "prior_runs_considered": (
+                {"run_id": "run-2026-06-09", "run_date": "2026-06-09"},
+                {"run_id": "run-2026-06-08", "run_date": "2026-06-08"},
+            ),
+            "prior_event_records_considered": 42,
             "sentiment_change_since_prior_run": {
                 "NVDA": {
                     "prior": 0.1,
