@@ -25,10 +25,37 @@ from .tickers import load_tracked_tickers
 
 EVENT_SIMILARITY_THRESHOLD = 0.78
 DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS = 3
+DEFAULT_EVENT_REVIEW_MAX_PAIRS = 200
+DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN = 0.08
 EVENT_IDENTITY_METHODS = (
     "exact_url_repeat",
     "fuzzy_event_repeat",
     "likely_new_event",
+)
+EVENT_PAIR_REVIEW_METHODS = (
+    "exact_url_repeat",
+    "fuzzy_event_repeat",
+    "near_miss",
+    "likely_new_event",
+)
+EVENT_PAIR_REVIEW_FIELDS = (
+    "current_ticker",
+    "prior_ticker",
+    "current_title",
+    "prior_title",
+    "current_url",
+    "prior_url",
+    "current_published_at",
+    "prior_published_at",
+    "current_source",
+    "prior_source",
+    "match_method",
+    "similarity_score",
+    "threshold_used",
+    "date_distance_days",
+    "event_type",
+    "article_type",
+    "recommended_label",
 )
 EVENT_TITLE_STOP_WORDS = {
     "a",
@@ -176,6 +203,29 @@ class EventMemoryComparison:
         return payload
 
 
+@dataclass(frozen=True)
+class EventPairReview:
+    rows: tuple[Mapping[str, object], ...]
+    max_pairs: int
+    near_miss_margin: float
+    threshold_used: float
+
+    def diagnostics(self) -> dict[str, object]:
+        counts = Counter(
+            str(row.get("match_method") or "")
+            for row in self.rows
+        )
+        return {
+            "event_pair_review_count": len(self.rows),
+            "exact_review_pairs": counts["exact_url_repeat"],
+            "fuzzy_review_pairs": counts["fuzzy_event_repeat"],
+            "near_miss_review_pairs": counts["near_miss"],
+            "likely_new_review_examples": counts["likely_new_event"],
+            "event_review_max_pairs": self.max_pairs,
+            "event_review_near_miss_margin": self.near_miss_margin,
+        }
+
+
 def build_event_memory_records(
     *,
     articles: Sequence[Article],
@@ -308,6 +358,102 @@ def write_event_memory_artifacts(
     fieldnames = tuple(EventMemoryRecord.__dataclass_fields__)
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return str(json_path), str(csv_path)
+
+
+def build_event_pair_review(
+    *,
+    current_records: Sequence[EventMemoryRecord],
+    prior_snapshot: PriorEventMemorySnapshot,
+    comparison: EventMemoryComparison,
+    max_pairs: int = DEFAULT_EVENT_REVIEW_MAX_PAIRS,
+    near_miss_margin: float = DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN,
+) -> EventPairReview:
+    bounded_max_pairs = max(1, int(max_pairs))
+    bounded_margin = max(
+        0.0,
+        min(float(near_miss_margin), comparison.event_similarity_threshold),
+    )
+    current_rows = tuple(record.as_dict() for record in current_records)
+    prior_rows = tuple(prior_snapshot.records)
+    review_rows: list[Mapping[str, object]] = []
+
+    for current_index, current in enumerate(current_rows):
+        match = (
+            comparison.event_identity_matches[current_index]
+            if current_index < len(comparison.event_identity_matches)
+            else {}
+        )
+        method = str(match.get("category") or "likely_new_event")
+        prior_index = _optional_int(match.get("prior_record_index"))
+        prior = (
+            prior_rows[prior_index]
+            if prior_index is not None
+            and 0 <= prior_index < len(prior_rows)
+            else None
+        )
+        similarity = _optional_float(match.get("title_similarity")) or 0.0
+
+        if method not in {"exact_url_repeat", "fuzzy_event_repeat"}:
+            prior_index, similarity = _best_review_prior_candidate(
+                current,
+                prior_rows,
+                lookback_days=comparison.event_memory_lookback_days,
+            )
+            prior = (
+                prior_rows[prior_index]
+                if prior_index is not None
+                else None
+            )
+            if (
+                prior is not None
+                and comparison.event_similarity_threshold - bounded_margin
+                <= similarity
+                < comparison.event_similarity_threshold
+            ):
+                method = "near_miss"
+            else:
+                method = "likely_new_event"
+
+        review_rows.append(
+            _event_pair_review_row(
+                current,
+                prior,
+                match_method=method,
+                similarity=similarity,
+                threshold=comparison.event_similarity_threshold,
+            )
+        )
+
+    return EventPairReview(
+        rows=_balanced_review_rows(review_rows, limit=bounded_max_pairs),
+        max_pairs=bounded_max_pairs,
+        near_miss_margin=round(bounded_margin, 4),
+        threshold_used=comparison.event_similarity_threshold,
+    )
+
+
+def write_event_pair_review_artifacts(
+    review: EventPairReview,
+    *,
+    output_dir: str | Path,
+) -> tuple[str, str]:
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    json_path = directory / "event_pair_review.json"
+    csv_path = directory / "event_pair_review.csv"
+    rows = [dict(row) for row in review.rows]
+    json_path.write_text(
+        json.dumps(rows, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=EVENT_PAIR_REVIEW_FIELDS,
+        )
         writer.writeheader()
         writer.writerows(rows)
     return str(json_path), str(csv_path)
@@ -596,6 +742,10 @@ def compare_event_memory(
             _identity_match_row(
                 current,
                 prior,
+                current_record_index=current_index,
+                prior_record_index=(
+                    prior_index if match is not None else None
+                ),
                 category=category,
                 similarity=similarity,
             )
@@ -899,11 +1049,15 @@ def _identity_match_row(
     current: Mapping[str, object],
     prior: Mapping[str, object] | None,
     *,
+    current_record_index: int,
+    prior_record_index: int | None,
     category: str,
     similarity: float,
 ) -> Mapping[str, object]:
     return {
         "category": category,
+        "current_record_index": current_record_index,
+        "prior_record_index": prior_record_index,
         "ticker": str(current.get("ticker") or "").upper(),
         "current_article_id": str(current.get("article_id") or ""),
         "current_canonical_url": str(current.get("canonical_url") or ""),
@@ -931,6 +1085,143 @@ def _identity_match_row(
         ),
         "title_similarity": round(similarity, 4),
     }
+
+
+def _best_review_prior_candidate(
+    current: Mapping[str, object],
+    prior_records: Sequence[Mapping[str, object]],
+    *,
+    lookback_days: int,
+) -> tuple[int | None, float]:
+    current_ticker = str(current.get("ticker") or "").upper()
+    current_title = _record_title(current)
+    current_date = _record_date_bucket(current)
+    if not current_ticker or not current_title or current_date is None:
+        return None, 0.0
+
+    current_company = str(current.get("company") or "")
+    candidates: list[tuple[float, int, int]] = []
+    for index, prior in enumerate(prior_records):
+        if str(prior.get("ticker") or "").upper() != current_ticker:
+            continue
+        prior_date = _record_date_bucket(prior)
+        if prior_date is None:
+            continue
+        date_distance = abs((current_date - prior_date).days)
+        if date_distance > lookback_days:
+            continue
+        similarity = event_title_similarity(
+            current_title,
+            _record_title(prior),
+            ticker=current_ticker,
+            company=current_company or str(prior.get("company") or ""),
+        )
+        candidates.append((similarity, -date_distance, index))
+
+    if not candidates:
+        return None, 0.0
+    similarity, _date_distance, index = max(
+        candidates,
+        key=lambda item: (item[0], item[1], -item[2]),
+    )
+    return index, round(similarity, 4)
+
+
+def _event_pair_review_row(
+    current: Mapping[str, object],
+    prior: Mapping[str, object] | None,
+    *,
+    match_method: str,
+    similarity: float,
+    threshold: float,
+) -> Mapping[str, object]:
+    current_date = _record_date_bucket(current)
+    prior_date = _record_date_bucket(prior) if prior is not None else None
+    date_distance = (
+        abs((current_date - prior_date).days)
+        if current_date is not None and prior_date is not None
+        else None
+    )
+    return {
+        "current_ticker": str(current.get("ticker") or "").upper(),
+        "prior_ticker": (
+            str(prior.get("ticker") or "").upper()
+            if prior is not None
+            else ""
+        ),
+        "current_title": _record_title(current),
+        "prior_title": _record_title(prior) if prior is not None else "",
+        "current_url": str(current.get("canonical_url") or ""),
+        "prior_url": (
+            str(prior.get("canonical_url") or "")
+            if prior is not None
+            else ""
+        ),
+        "current_published_at": str(current.get("published_at") or ""),
+        "prior_published_at": (
+            str(prior.get("published_at") or "")
+            if prior is not None
+            else ""
+        ),
+        "current_source": _record_source(current),
+        "prior_source": _record_source(prior) if prior is not None else "",
+        "match_method": match_method,
+        "similarity_score": round(similarity, 4),
+        "threshold_used": round(threshold, 4),
+        "date_distance_days": date_distance,
+        "event_type": str(current.get("event_type") or ""),
+        "article_type": str(current.get("article_type") or ""),
+        "recommended_label": "",
+    }
+
+
+def _balanced_review_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    limit: int,
+) -> tuple[Mapping[str, object], ...]:
+    grouped = {
+        method: [
+            row
+            for row in rows
+            if row.get("match_method") == method
+        ]
+        for method in EVENT_PAIR_REVIEW_METHODS
+    }
+    for method, method_rows in grouped.items():
+        reverse = method in {"fuzzy_event_repeat", "near_miss"}
+        method_rows.sort(
+            key=lambda row: (
+                float(row.get("similarity_score") or 0.0),
+                str(row.get("current_ticker") or ""),
+                str(row.get("current_title") or ""),
+            ),
+            reverse=reverse,
+        )
+
+    selected: list[Mapping[str, object]] = []
+    priority = (
+        "fuzzy_event_repeat",
+        "near_miss",
+        "exact_url_repeat",
+        "likely_new_event",
+    )
+    while len(selected) < limit and any(grouped.values()):
+        for method in priority:
+            if len(selected) >= limit:
+                break
+            if grouped[method]:
+                selected.append(grouped[method].pop(0))
+    return tuple(selected)
+
+
+def _record_source(record: Mapping[str, object]) -> str:
+    return str(
+        record.get("source_provider")
+        or record.get("provider")
+        or record.get("source_family")
+        or "unknown"
+    )
 
 
 def _record_title(record: Mapping[str, object]) -> str:
@@ -1116,5 +1407,12 @@ def _average_sentiment_by_ticker(
 def _optional_float(value: object) -> float | None:
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: object) -> int | None:
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None

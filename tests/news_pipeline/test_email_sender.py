@@ -44,6 +44,31 @@ class EmailSenderCliTests(unittest.TestCase):
         self.assertEqual(payload["backend"], "local_preview")
         self.assertFalse(fake_sender.sent_payloads)
 
+    def test_event_calibration_never_uses_email_sender(self):
+        fake_sender = FakeEmailSender()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            labeled_path = Path(temp_dir) / "event_pair_review.csv"
+            labeled_path.write_text(
+                "similarity_score,recommended_label\n"
+                "0.90,same_event\n"
+                "0.40,different_event\n",
+                encoding="utf-8",
+            )
+            stdout, exit_code = _run_cli(
+                "calibrate-event-matching",
+                temp_dir,
+                extra_args=[
+                    "--labeled-event-pairs",
+                    str(labeled_path),
+                ],
+                email_sender=fake_sender,
+            )
+            payload = json.loads(stdout)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "calibration_complete")
+        self.assertFalse(fake_sender.sent_payloads)
+
     def test_send_daily_report_without_recipient_refuses_to_send(self):
         fake_sender = FakeEmailSender()
         with tempfile.TemporaryDirectory() as temp_dir:

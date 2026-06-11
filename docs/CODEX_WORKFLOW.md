@@ -30,6 +30,20 @@ worktree. Preserve unrelated user changes and do not revert them.
 Secret and environment files remain off limits. CLI environment diagnostics
 may report only `set` or `missing`; they must never expose values.
 
+## Major-Phase Final Summary
+
+Use this concise structure at the end of every major phase unless the prompt
+requires an exact alternative:
+
+1. Changed files
+2. Tests and validation
+3. Key metrics
+4. What improved
+5. What is still weak
+6. Safety check
+7. Commit recommendation
+8. Recommended next step
+
 ## Short Prompt Template
 
 ```text
@@ -51,10 +65,13 @@ Validation:
 
 Return:
 1. Changed files
-2. Tests and result
+2. Tests and validation
 3. Key metrics
-4. Remaining issues
-5. Commit recommendation
+4. What improved
+5. What is still weak
+6. Safety check
+7. Commit recommendation
+8. Recommended next step
 
 Do not commit or push.
 ```

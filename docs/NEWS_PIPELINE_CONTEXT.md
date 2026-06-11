@@ -47,6 +47,8 @@ The production pipeline currently includes:
 21. Coverage-aware Alpha Vantage benchmark allocation.
 22. Configurable comparison with event memory from multiple prior dated runs.
 23. Cross-run exact and fuzzy event identity matching.
+24. Capped event-pair review artifacts for fuzzy-threshold calibration.
+25. Offline labeled event-pair calibration across configurable thresholds.
 
 ## API And Source State
 
@@ -114,13 +116,16 @@ Event-memory records retain the original event title, a normalized title,
 publication date bucket, and a deterministic identity fingerprint containing
 ticker, title, event and article types, company, source family, and date.
 Comparison diagnostics distinguish exact URL repeats, fuzzy event repeats, and
-likely new events.
+likely new events. Each run also writes capped JSON and CSV review artifacts
+containing exact matches, fuzzy matches, near-misses, and likely-new examples
+with blank reviewer labels.
 
-The next recommended phase is to calibrate fuzzy identity thresholds and
-lookback duration from labeled multi-run examples, consolidate duplicate prior
-events before sentiment baselining, add multi-run sentiment trend summaries and
-benchmark calibration, and consider deeper SEC filing parsing as a separately
-scoped future phase.
+The next recommended phase is to label a representative event-pair sample, run
+the offline calibration command, review precision/recall tradeoffs, and approve
+a production threshold in a separately scoped change. Historical
+duplicate-event consolidation should follow before multi-run sentiment
+baselining. Multi-run sentiment trends, benchmark calibration, and deeper SEC
+filing parsing remain later phases.
 
 ## Event And Sentiment Memory
 
@@ -150,6 +155,30 @@ prior runs, and prior record count are reported in diagnostics. Comparisons
 record exact URL repeats, fuzzy repeats, likely new events, and per-ticker
 changes in average internal sentiment. Same-day reruns are intentionally not
 treated as an earlier reporting period.
+
+`event_pair_review.json` and `event_pair_review.csv` are generated for manual
+calibration. Rows include the current/prior titles, URLs, timestamps, sources,
+match method, similarity score, threshold, date distance, event/article types,
+and a blank `recommended_label`. `--event-review-max-pairs` defaults to 200,
+and `--event-review-near-miss-margin` defaults to 0.08. These review artifacts
+remain backend diagnostics and are not added to the email body or attachments.
+
+Manually labeled review CSVs can be evaluated with:
+
+```bash
+python -B -m news_pipeline.cli calibrate-event-matching \
+  --artifacts-dir artifacts \
+  --labeled-event-pairs artifacts/runs/YYYY-MM-DD/event_pair_review.csv
+```
+
+Accepted `recommended_label` values are `same_event`, `different_event`,
+`uncertain`, and blank. Blank and uncertain rows are excluded from metrics.
+The default threshold sweep is 0.60 through 0.95 in 0.05 increments. Results
+are written to `event_match_calibration.json` and
+`event_match_calibration.csv`, including confusion-matrix counts, precision,
+recall, F1, and the highest-F1 recommendation with ties resolved toward higher
+precision. Calibration is advisory and does not modify the production event
+similarity threshold.
 
 SEC candidates are classified at least for:
 

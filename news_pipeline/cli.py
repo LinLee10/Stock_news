@@ -40,13 +40,25 @@ from .email_sender import (
     build_report_email_payload,
 )
 from .environment import environment_status, load_cli_environment
+from .event_calibration import (
+    DEFAULT_CALIBRATION_THRESHOLD_MAX,
+    DEFAULT_CALIBRATION_THRESHOLD_MIN,
+    DEFAULT_CALIBRATION_THRESHOLD_STEP,
+    EventCalibrationError,
+    calibrate_labeled_event_pairs,
+    write_event_match_calibration_artifacts,
+)
 from .event_memory import (
     DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
+    DEFAULT_EVENT_REVIEW_MAX_PAIRS,
+    DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN,
     alpha_vantage_selection_history,
+    build_event_pair_review,
     build_event_memory_records,
     compare_event_memory,
     load_latest_prior_event_memory,
     sec_event_candidate_rows,
+    write_event_pair_review_artifacts,
     write_event_memory_artifacts,
 )
 from .models import Article, ArticleSource, RunResult, SentimentResult, TickerMention
@@ -149,6 +161,27 @@ def build_parser() -> argparse.ArgumentParser:
     send_parser = subcommands.add_parser("send-daily-report")
     _add_send_daily_report_args(send_parser)
 
+    calibration_parser = subcommands.add_parser(
+        "calibrate-event-matching"
+    )
+    _add_safe_common_args(calibration_parser)
+    calibration_parser.add_argument("--labeled-event-pairs")
+    calibration_parser.add_argument(
+        "--threshold-min",
+        type=float,
+        default=DEFAULT_CALIBRATION_THRESHOLD_MIN,
+    )
+    calibration_parser.add_argument(
+        "--threshold-max",
+        type=float,
+        default=DEFAULT_CALIBRATION_THRESHOLD_MAX,
+    )
+    calibration_parser.add_argument(
+        "--threshold-step",
+        type=float,
+        default=DEFAULT_CALIBRATION_THRESHOLD_STEP,
+    )
+
     return parser
 
 
@@ -180,6 +213,54 @@ def main(
         environ=runtime_environ,
         dotenv_status=dotenv_status,
     )
+
+    if args.command == "calibrate-event-matching":
+        input_path = (
+            Path(args.labeled_event_pairs)
+            if args.labeled_event_pairs
+            else output_dir / "event_pair_review.csv"
+        )
+        try:
+            calibration = calibrate_labeled_event_pairs(
+                input_path,
+                threshold_min=float(args.threshold_min),
+                threshold_max=float(args.threshold_max),
+                threshold_step=float(args.threshold_step),
+            )
+        except EventCalibrationError as exc:
+            _print_json(
+                {
+                    **context,
+                    "status": "error",
+                    "reason": str(exc),
+                    "input_csv": str(input_path),
+                }
+            )
+            return 2
+        calibration_json, calibration_csv = (
+            write_event_match_calibration_artifacts(
+                calibration,
+                output_dir=output_dir,
+            )
+        )
+        payload = {
+            **context,
+            "status": "calibration_complete",
+            "input_csv": str(input_path),
+            "event_match_calibration_json": calibration_json,
+            "event_match_calibration_csv": calibration_csv,
+            "recommended_threshold": calibration.recommended_threshold,
+            "recommended_precision": (
+                calibration.recommended_metric.precision
+            ),
+            "recommended_recall": calibration.recommended_metric.recall,
+            "recommended_f1": calibration.recommended_metric.f1,
+            "labeled_pair_count": calibration.labeled_pair_count,
+            "ignored_pair_count": calibration.ignored_pair_count,
+            "production_threshold_changed": False,
+        }
+        _print_json(payload)
+        return 0
 
     if args.command == "init-db":
         database_path = Path(args.database_path) if args.database_path else output_dir / "news_pipeline.sqlite3"
@@ -476,6 +557,22 @@ def main(
                 output_dir / "event_memory_comparison.json",
                 event_memory_comparison.as_dict(),
             )
+            event_pair_review = build_event_pair_review(
+                current_records=event_memory_records,
+                prior_snapshot=prior_event_memory,
+                comparison=event_memory_comparison,
+                max_pairs=max(1, int(args.event_review_max_pairs)),
+                near_miss_margin=max(
+                    0.0,
+                    float(args.event_review_near_miss_margin),
+                ),
+            )
+            event_pair_review_json, event_pair_review_csv = (
+                write_event_pair_review_artifacts(
+                    event_pair_review,
+                    output_dir=output_dir,
+                )
+            )
             sec_candidates = sec_event_candidate_rows(post_dedup_articles)
             sec_event_counts: dict[str, int] = {}
             for row in sec_candidates:
@@ -488,6 +585,7 @@ def main(
                     ),
                     "event_memory_records_written": len(event_memory_records),
                     **event_memory_comparison.as_dict(),
+                    **event_pair_review.diagnostics(),
                 }
             )
 
@@ -629,6 +727,28 @@ def main(
             "event_memory_json": event_memory_json,
             "event_memory_csv": event_memory_csv,
             "event_memory_comparison": event_memory_comparison_path,
+            "event_pair_review_json": event_pair_review_json,
+            "event_pair_review_csv": event_pair_review_csv,
+            "event_pair_review_count": live_rss_summary.get(
+                "event_pair_review_count",
+                0,
+            ),
+            "exact_review_pairs": live_rss_summary.get(
+                "exact_review_pairs",
+                0,
+            ),
+            "fuzzy_review_pairs": live_rss_summary.get(
+                "fuzzy_review_pairs",
+                0,
+            ),
+            "near_miss_review_pairs": live_rss_summary.get(
+                "near_miss_review_pairs",
+                0,
+            ),
+            "likely_new_review_examples": live_rss_summary.get(
+                "likely_new_review_examples",
+                0,
+            ),
             "alpha_vantage_selected_tickers": live_rss_summary.get(
                 "alpha_vantage_selected_tickers",
                 [],
@@ -940,6 +1060,16 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
         "--event-memory-lookback-days",
         type=int,
         default=DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
+    )
+    parser.add_argument(
+        "--event-review-max-pairs",
+        type=int,
+        default=DEFAULT_EVENT_REVIEW_MAX_PAIRS,
+    )
+    parser.add_argument(
+        "--event-review-near-miss-margin",
+        type=float,
+        default=DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN,
     )
     parser.add_argument("--max-email-stories", type=int, default=DEFAULT_MAX_EMAIL_STORIES)
     parser.add_argument(
@@ -1374,6 +1504,15 @@ def _collect_daily_articles(
                 "likely_new_event": 0,
             },
             "event_similarity_threshold": 0.0,
+            "event_pair_review_count": 0,
+            "exact_review_pairs": 0,
+            "fuzzy_review_pairs": 0,
+            "near_miss_review_pairs": 0,
+            "likely_new_review_examples": 0,
+            "event_review_max_pairs": DEFAULT_EVENT_REVIEW_MAX_PAIRS,
+            "event_review_near_miss_margin": (
+                DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN
+            ),
             "sentiment_change_since_prior_run": {},
             "ticker_coverage_status": {},
             "google_dependence_by_ticker": {},
@@ -1652,6 +1791,15 @@ def _direct_source_diagnostics(
             "likely_new_event": 0,
         },
         "event_similarity_threshold": 0.0,
+        "event_pair_review_count": 0,
+        "exact_review_pairs": 0,
+        "fuzzy_review_pairs": 0,
+        "near_miss_review_pairs": 0,
+        "likely_new_review_examples": 0,
+        "event_review_max_pairs": DEFAULT_EVENT_REVIEW_MAX_PAIRS,
+        "event_review_near_miss_margin": (
+            DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN
+        ),
         "sentiment_change_since_prior_run": {},
         "ticker_coverage_status": {},
         "google_dependence_by_ticker": {},
@@ -3134,6 +3282,12 @@ def _markdown_diagnostics(report: DailyReportContract) -> list[str]:
         f"lookback days: {int(report.source_coverage_diagnostics.get('event_memory_lookback_days', DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS))}; "
         f"prior runs: {len(report.source_coverage_diagnostics.get('prior_runs_considered') or ())}; "
         f"prior records: {int(report.source_coverage_diagnostics.get('prior_event_records_considered', 0))}",
+        "",
+        f"Event pair review: {int(report.source_coverage_diagnostics.get('event_pair_review_count', 0))} rows; "
+        f"exact: {int(report.source_coverage_diagnostics.get('exact_review_pairs', 0))}; "
+        f"fuzzy: {int(report.source_coverage_diagnostics.get('fuzzy_review_pairs', 0))}; "
+        f"near misses: {int(report.source_coverage_diagnostics.get('near_miss_review_pairs', 0))}; "
+        f"likely new examples: {int(report.source_coverage_diagnostics.get('likely_new_review_examples', 0))}",
         "",
         f"Alpha selection reasons: {_escape_markdown(alpha_selection_reasons or 'none')}",
         "",

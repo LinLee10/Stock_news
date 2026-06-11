@@ -794,6 +794,12 @@ def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
             f"lookback days: {int(diagnostics.get('event_memory_lookback_days', 3))}; "
             f"prior runs: {len(diagnostics.get('prior_runs_considered') or ())}; "
             f"prior records: {int(diagnostics.get('prior_event_records_considered', 0))}</p>",
+            "  <p><strong>Event pair review:</strong> "
+            f"{int(diagnostics.get('event_pair_review_count', 0))} rows; "
+            f"exact: {int(diagnostics.get('exact_review_pairs', 0))}; "
+            f"fuzzy: {int(diagnostics.get('fuzzy_review_pairs', 0))}; "
+            f"near misses: {int(diagnostics.get('near_miss_review_pairs', 0))}; "
+            f"likely new examples: {int(diagnostics.get('likely_new_review_examples', 0))}</p>",
             f"  <p><strong>Alpha selection reasons:</strong> {escape(selection_reasons or 'none')}</p>",
             f"  <p><strong>Sentiment changes since prior run:</strong> {escape(sentiment_changes or 'none')}</p>",
             "  <table>",

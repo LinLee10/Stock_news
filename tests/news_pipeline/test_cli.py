@@ -354,6 +354,71 @@ class CliTests(unittest.TestCase):
                 0,
             )
             self.assertEqual(second["sentiment_change_since_prior_run"], {})
+            review_json = Path(second["event_pair_review_json"])
+            review_csv = Path(second["event_pair_review_csv"])
+            self.assertTrue(review_json.exists())
+            self.assertTrue(review_csv.exists())
+            review_rows = json.loads(
+                review_json.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                second["event_pair_review_count"],
+                len(review_rows),
+            )
+            self.assertLessEqual(second["event_pair_review_count"], 200)
+            self.assertGreater(second["exact_review_pairs"], 0)
+            self.assertEqual(
+                second["event_pair_review_count"],
+                second["exact_review_pairs"]
+                + second["fuzzy_review_pairs"]
+                + second["near_miss_review_pairs"]
+                + second["likely_new_review_examples"],
+            )
+
+    def test_dry_run_daily_event_pair_review_respects_cli_cap(self):
+        titles = (
+            "NVIDIA reports quarterly earnings",
+            "NVIDIA launches Blackwell data center platform",
+            "NVIDIA faces an antitrust investigation",
+        )
+        articles = [
+            Article(
+                canonical_url=f"https://example.com/nvda-review-{index}",
+                title=title,
+                snippet=f"NVDA company update for review case {index}.",
+                published_at="2026-06-02T12:00:00Z",
+            )
+            for index, title in enumerate(titles)
+        ]
+        fake_providers = {"rss": ListProvider(articles)}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _run_cli(
+                "dry-run-daily",
+                temp_dir,
+                extra_args=["--run-date", "2026-06-02"],
+                fake_providers=fake_providers,
+            )
+            payload = json.loads(
+                _run_cli(
+                    "dry-run-daily",
+                    temp_dir,
+                    extra_args=[
+                        "--event-review-max-pairs",
+                        "2",
+                        "--event-review-near-miss-margin",
+                        "0.05",
+                    ],
+                    fake_providers=fake_providers,
+                )
+            )
+
+            self.assertEqual(payload["event_pair_review_count"], 2)
+            review_rows = json.loads(
+                Path(payload["event_pair_review_json"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(len(review_rows), 2)
 
     def test_dry_run_daily_same_date_is_idempotent_in_sqlite(self):
         with tempfile.TemporaryDirectory() as temp_dir:

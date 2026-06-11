@@ -1,3 +1,4 @@
+import csv
 import json
 from pathlib import Path
 import tempfile
@@ -11,12 +12,14 @@ from news_pipeline.event_memory import (
     EventMemoryRecord,
     PriorEventMemorySnapshot,
     alpha_vantage_selection_history,
+    build_event_pair_review,
     build_event_memory_records,
     compare_event_memory,
     event_date_bucket,
     event_identity_fingerprint,
     load_latest_prior_event_memory,
     normalize_event_title,
+    write_event_pair_review_artifacts,
     write_event_memory_artifacts,
 )
 from news_pipeline.models import Article, RunResult, TickerMention
@@ -585,6 +588,109 @@ class EventMemoryTests(unittest.TestCase):
         self.assertEqual(len(comparison.prior_runs_considered), 2)
         self.assertEqual(comparison.prior_event_records_considered, 2)
 
+    def test_event_pair_review_writes_all_review_categories(self):
+        current_records, prior = _review_fixture()
+        comparison = compare_event_memory(current_records, prior)
+        review = build_event_pair_review(
+            current_records=current_records,
+            prior_snapshot=prior,
+            comparison=comparison,
+        )
+
+        methods = {row["match_method"] for row in review.rows}
+        self.assertEqual(
+            methods,
+            {
+                "exact_url_repeat",
+                "fuzzy_event_repeat",
+                "near_miss",
+                "likely_new_event",
+            },
+        )
+        self.assertTrue(
+            all(
+                row["threshold_used"] == EVENT_SIMILARITY_THRESHOLD
+                for row in review.rows
+            )
+        )
+        self.assertTrue(
+            all(row["recommended_label"] == "" for row in review.rows)
+        )
+        near_miss = next(
+            row for row in review.rows
+            if row["match_method"] == "near_miss"
+        )
+        self.assertLess(
+            near_miss["similarity_score"],
+            near_miss["threshold_used"],
+        )
+        self.assertGreaterEqual(
+            near_miss["similarity_score"],
+            near_miss["threshold_used"] - 0.08,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            json_path, csv_path = write_event_pair_review_artifacts(
+                review,
+                output_dir=temp_dir,
+            )
+            json_rows = json.loads(
+                Path(json_path).read_text(encoding="utf-8")
+            )
+            with Path(csv_path).open(
+                newline="",
+                encoding="utf-8",
+            ) as handle:
+                csv_rows = list(csv.DictReader(handle))
+
+        self.assertEqual(len(json_rows), 4)
+        self.assertEqual(len(csv_rows), 4)
+        self.assertEqual(
+            {row["match_method"] for row in json_rows},
+            methods,
+        )
+        self.assertTrue(
+            all(row["recommended_label"] == "" for row in csv_rows)
+        )
+
+    def test_event_pair_review_cap_is_respected(self):
+        current_records, prior = _review_fixture()
+        comparison = compare_event_memory(current_records, prior)
+        review = build_event_pair_review(
+            current_records=current_records,
+            prior_snapshot=prior,
+            comparison=comparison,
+            max_pairs=2,
+        )
+
+        self.assertEqual(len(review.rows), 2)
+        self.assertEqual(review.diagnostics()["event_pair_review_count"], 2)
+
+    def test_event_pair_review_near_miss_margin_is_respected(self):
+        current_records, prior = _review_fixture()
+        comparison = compare_event_memory(current_records, prior)
+        narrow_review = build_event_pair_review(
+            current_records=current_records,
+            prior_snapshot=prior,
+            comparison=comparison,
+            near_miss_margin=0.01,
+        )
+        broad_review = build_event_pair_review(
+            current_records=current_records,
+            prior_snapshot=prior,
+            comparison=comparison,
+            near_miss_margin=0.08,
+        )
+
+        self.assertEqual(
+            narrow_review.diagnostics()["near_miss_review_pairs"],
+            0,
+        )
+        self.assertEqual(
+            broad_review.diagnostics()["near_miss_review_pairs"],
+            1,
+        )
+
     def test_selection_history_identifies_google_dominance_and_benchmark_gaps(self):
         snapshot = PriorEventMemorySnapshot(
             available=True,
@@ -734,6 +840,75 @@ class EventMemoryTests(unittest.TestCase):
         scores = {record.ticker: record.external_sentiment for record in records}
         self.assertEqual(scores["NVDA"], 0.7)
         self.assertEqual(scores["AMD"], -0.2)
+
+
+def _review_fixture():
+    prior_records = (
+        _memory_record(
+            "NVDA",
+            "https://example.com/nvda-exact",
+            0.1,
+            title="NVIDIA reports quarterly earnings",
+            company="NVIDIA",
+        ).as_dict(),
+        _memory_record(
+            "AMD",
+            "https://example.com/amd-prior",
+            0.1,
+            title="AMD launches Blackwell AI chips for data centers",
+            company="AMD",
+        ).as_dict(),
+        _memory_record(
+            "META",
+            "https://example.com/meta-prior",
+            0.1,
+            title="Meta launches Blackwell AI chips for data centers",
+            company="Meta",
+        ).as_dict(),
+        _memory_record(
+            "MU",
+            "https://example.com/mu-prior",
+            0.1,
+            title="Micron reports quarterly earnings",
+            company="Micron Technology",
+        ).as_dict(),
+    )
+    current_records = (
+        _memory_record(
+            "NVDA",
+            "https://example.com/nvda-exact",
+            0.2,
+            title="NVIDIA reports quarterly earnings",
+            company="NVIDIA",
+        ),
+        _memory_record(
+            "AMD",
+            "https://example.com/amd-current",
+            0.2,
+            title="AMD unveils Blackwell AI chips for data centers",
+            company="AMD",
+        ),
+        _memory_record(
+            "META",
+            "https://example.com/meta-current",
+            0.2,
+            title="Meta announces Blackwell AI chips for cloud customers",
+            company="Meta",
+        ),
+        _memory_record(
+            "MU",
+            "https://example.com/mu-current",
+            0.2,
+            title="Micron opens a new memory fabrication facility",
+            company="Micron Technology",
+        ),
+    )
+    return current_records, PriorEventMemorySnapshot(
+        available=True,
+        run_id="prior-run",
+        run_date="2026-06-08",
+        records=prior_records,
+    )
 
 
 if __name__ == "__main__":

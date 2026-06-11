@@ -72,6 +72,10 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("lookback days: 3", html)
             self.assertIn("prior runs: 2", html)
             self.assertIn("prior records: 42", html)
+            self.assertIn("Event pair review:", html)
+            self.assertIn("12 rows", html)
+            self.assertIn("near misses: 3", html)
+            self.assertIn("likely new examples: 5", html)
             self.assertIn("NVDA: +0.1250", html)
 
     def test_csv_attachment_contains_expected_rows(self):
@@ -226,6 +230,11 @@ def _fake_report_input() -> DailyReportInput:
                 {"run_id": "run-2026-06-08", "run_date": "2026-06-08"},
             ),
             "prior_event_records_considered": 42,
+            "event_pair_review_count": 12,
+            "exact_review_pairs": 2,
+            "fuzzy_review_pairs": 2,
+            "near_miss_review_pairs": 3,
+            "likely_new_review_examples": 5,
             "sentiment_change_since_prior_run": {
                 "NVDA": {
                     "prior": 0.1,
