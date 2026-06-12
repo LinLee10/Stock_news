@@ -23,9 +23,12 @@ from news_pipeline.llm_briefing import (
     LlmBriefingTier,
     briefing_response_schema,
     build_llm_briefing_input,
+    classify_llm_source_quality,
     estimate_llm_briefing_cost,
+    llm_event_priority_score,
 )
 from news_pipeline.models import Article
+from news_pipeline.source_quality import UNKNOWN_SOURCE_LABEL
 
 
 class CountingLlmClient:
@@ -157,6 +160,149 @@ class LlmBriefingTests(unittest.TestCase):
         self.assertIn("repeated_vs_new_events", schema["properties"])
         self.assertIn("uncertainty_notes", schema["properties"])
         self.assertIn("evidence", schema["properties"])
+
+    def test_priority_score_favors_portfolio_over_watchlist_noise(self):
+        portfolio_score, _ = llm_event_priority_score(
+            _priority_packet(
+                group="portfolio",
+                article_type="product_or_ai_or_chip_news",
+            )
+        )
+        watchlist_score, _ = llm_event_priority_score(
+            _priority_packet(
+                group="watchlist",
+                article_type="generic_buy_sell_hold_opinion",
+            )
+        )
+
+        self.assertGreater(portfolio_score, watchlist_score)
+
+    def test_repeated_developing_event_beats_generic_isolated_article(self):
+        repeated_score, _ = llm_event_priority_score(
+            _priority_packet(
+                group="watchlist",
+                event_status="fuzzy_event_repeat",
+                article_type="product_or_ai_or_chip_news",
+            )
+        )
+        isolated_score, _ = llm_event_priority_score(
+            _priority_packet(
+                group="watchlist",
+                event_status="likely_new_event",
+                article_type="generic_buy_sell_hold_opinion",
+            )
+        )
+
+        self.assertGreater(repeated_score, isolated_score)
+
+    def test_official_signal_boosts_priority(self):
+        normal_score, _ = llm_event_priority_score(_priority_packet())
+        official_score, reasons = llm_event_priority_score(
+            _priority_packet(official=True)
+        )
+
+        self.assertGreater(official_score, normal_score)
+        self.assertIn("official_or_sec_signal", reasons)
+
+    def test_uncertainty_reduces_priority(self):
+        clear_score, _ = llm_event_priority_score(_priority_packet())
+        uncertain_score, reasons = llm_event_priority_score(
+            _priority_packet(
+                uncertainty=(
+                    "snippet_based_sentiment",
+                    "event_type_unknown",
+                )
+            )
+        )
+
+        self.assertLess(uncertain_score, clear_score)
+        self.assertIn("uncertainty_penalty", reasons)
+
+    def test_packet_and_per_ticker_caps_are_respected(self):
+        records = tuple(
+            replace(
+                _record(),
+                article_id=f"nvda-{index}",
+                canonical_url=f"https://example.com/nvda-{index}",
+                cluster_id=f"cluster-{index}",
+                event_title=f"NVIDIA material event {index}",
+            )
+            for index in range(5)
+        ) + tuple(
+            replace(
+                _record(),
+                article_id=f"meta-{index}",
+                canonical_url=f"https://example.com/meta-{index}",
+                ticker="META",
+                company="Meta",
+                cluster_id=f"meta-cluster-{index}",
+                event_title=f"Meta material event {index}",
+            )
+            for index in range(4)
+        )
+        comparison = compare_event_memory(
+            records,
+            PriorEventMemorySnapshot(available=False),
+        )
+
+        payload = build_llm_briefing_input(
+            records=records,
+            clusters=(),
+            comparison=comparison,
+            run_date="2026-06-12",
+            tier=LLM_BRIEFING_TIERS["daily"],
+            max_event_packets=4,
+            max_events_per_ticker=2,
+            include_low_priority_events=True,
+        )
+        ticker_counts = {
+            packet["ticker"]: packet["event_count"]
+            for packet in payload["ticker_packets"]
+        }
+
+        self.assertEqual(payload["event_packet_count"], 4)
+        self.assertLessEqual(max(ticker_counts.values()), 2)
+
+    def test_low_priority_events_are_excluded_by_default(self):
+        record = replace(
+            _record(),
+            ticker="META",
+            company="Meta",
+            article_type="generic_buy_sell_hold_opinion",
+            event_type="generic_buy_sell_hold_opinion",
+            extraction_basis="snippet",
+        )
+        comparison = compare_event_memory(
+            (record,),
+            PriorEventMemorySnapshot(available=True, records=()),
+        )
+
+        payload = build_llm_briefing_input(
+            records=(record,),
+            clusters=(),
+            comparison=comparison,
+            run_date="2026-06-12",
+            tier=LLM_BRIEFING_TIERS["daily"],
+        )
+
+        self.assertEqual(payload["event_packets_before_filter"], 1)
+        self.assertEqual(payload["event_packet_count"], 0)
+        self.assertEqual(payload["packets_dropped_low_priority"], 1)
+
+    def test_known_source_family_is_not_unclassified(self):
+        quality = classify_llm_source_quality(
+            Article(
+                canonical_url="https://news.google.com/example",
+                title="NVIDIA market update",
+                metadata={
+                    "provider": "google_news_rss_search",
+                    "source_family": "google_news_backstop",
+                },
+            )
+        )
+
+        self.assertNotEqual(quality.label, UNKNOWN_SOURCE_LABEL)
+        self.assertEqual(quality.label, "tier_3_low_priority")
 
     def test_llm_is_disabled_by_default(self):
         client = CountingLlmClient()
@@ -436,6 +582,30 @@ def _record() -> EventMemoryRecord:
         run_id="run-2026-06-12",
         run_date="2026-06-12",
     )
+
+
+def _priority_packet(
+    *,
+    group="watchlist",
+    event_status="likely_new_event",
+    article_type="product_or_ai_or_chip_news",
+    official=False,
+    uncertainty=(),
+):
+    return {
+        "ticker": "META",
+        "portfolio_watchlist_status": group,
+        "new_repeated_status": event_status,
+        "source_quality": {"tier": 2, "label": "tier_2_usable"},
+        "source_count": 1,
+        "sentiment_change": None,
+        "official_signal": official,
+        "benchmark_disagreement": False,
+        "article_type": article_type,
+        "source_family": "direct_news_publisher",
+        "uncertainty": uncertainty,
+        "top_titles": ["Example event"],
+    }
 
 
 def _run_dry_run(

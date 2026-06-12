@@ -10,16 +10,43 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 from urllib.request import Request, urlopen
 
+from .article_types import ARTICLE_TYPE_SERIOUSNESS
 from .dedup import DedupeCluster, SourceLink
 from .event_memory import EventMemoryComparison, EventMemoryRecord
 from .models import Article
-from .source_quality import assess_article_source
+from .source_quality import (
+    TIER_1_HIGH_TRUST,
+    TIER_2_USABLE,
+    TIER_3_LOW_PRIORITY,
+    TIER_LABELS,
+    UNKNOWN_SOURCE_LABEL,
+    SourceQuality,
+    assess_article_source,
+)
 from .tickers import ticker_lookup
 
 
 DEFAULT_LLM_BRIEFING_TIER = "daily"
-DEFAULT_MAX_LLM_EVENT_PACKETS = 200
+DEFAULT_MAX_LLM_EVENT_PACKETS = 60
+DEFAULT_MAX_LLM_EVENTS_PER_TICKER = 3
+DEFAULT_LLM_LOW_PRIORITY_THRESHOLD = 30.0
+DEFAULT_LLM_TOP_MONITOR_CANDIDATES = 5
 OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
+LLM_TIER_1_SOURCE_FAMILIES = {
+    "company_investor_relations",
+    "regulatory_official",
+}
+LLM_TIER_2_SOURCE_FAMILIES = {
+    "context_news_api",
+    "direct_news_publisher",
+    "external_general_news_api",
+    "external_market_news_api",
+    "market_data_or_analysis",
+    "press_release_wire",
+}
+LLM_TIER_3_SOURCE_FAMILIES = {
+    "google_news_backstop",
+}
 
 
 @dataclass(frozen=True)
@@ -204,6 +231,8 @@ def build_llm_briefing_input(
     run_date: str,
     tier: LlmBriefingTier,
     max_event_packets: int = DEFAULT_MAX_LLM_EVENT_PACKETS,
+    max_events_per_ticker: int = DEFAULT_MAX_LLM_EVENTS_PER_TICKER,
+    include_low_priority_events: bool = False,
 ) -> dict[str, object]:
     tracked = ticker_lookup()
     cluster_by_id = {
@@ -221,9 +250,12 @@ def build_llm_briefing_input(
         cluster = cluster_by_id.get(record.cluster_id)
         article = cluster.canonical_article if cluster else None
         quality = (
-            assess_article_source(article)
+            classify_llm_source_quality(article)
             if article is not None
-            else None
+            else _llm_source_family_quality(
+                record.source_family,
+                publisher=record.source_provider,
+            )
         )
         match = matches_by_index.get(index, {})
         ticker = tracked.get(record.ticker)
@@ -234,8 +266,7 @@ def build_llm_briefing_input(
             event_status=event_status,
             prior_available=comparison.prior_run_available,
         )
-        packets.append(
-            {
+        packet = {
                 "ticker": record.ticker,
                 "company": record.company,
                 "portfolio_watchlist_status": (
@@ -268,14 +299,29 @@ def build_llm_briefing_input(
                 "source_count": cluster.source_count if cluster else 1,
                 "source_provider": record.source_provider,
                 "source_family": record.source_family,
+                "official_signal": _is_official_signal(record),
+                "benchmark_disagreement": _benchmark_disagreement(record),
                 "top_titles": _cluster_titles(record, cluster),
                 "urls": _cluster_urls(record, cluster),
                 "uncertainty": uncertainty,
             }
-        )
-    packets.sort(key=_packet_sort_key)
-    bounded_packets = packets[: max(1, int(max_event_packets))]
+        score, reasons = llm_event_priority_score(packet)
+        packet["attention_score"] = score
+        packet["priority_reasons"] = reasons
+        packets.append(packet)
+    before_filter = len(packets)
+    bounded_packets = _select_event_packets(
+        packets,
+        max_event_packets=max_event_packets,
+        max_events_per_ticker=max_events_per_ticker,
+        include_low_priority_events=include_low_priority_events,
+    )
     ticker_packets = _build_ticker_packets(bounded_packets)
+    top_monitor_candidates = _top_monitor_candidates(ticker_packets)
+    attention_scores = [
+        float(packet["attention_score"])
+        for packet in bounded_packets
+    ]
     return {
         "briefing_type": "portfolio_watchlist_market_intelligence",
         "run_date": run_date,
@@ -306,12 +352,132 @@ def build_llm_briefing_input(
             ),
             "likely_new_events": comparison.new_events_since_prior_run,
         },
+        "filtering": {
+            "max_event_packets": max(1, int(max_event_packets)),
+            "max_events_per_ticker": max(
+                1,
+                int(max_events_per_ticker),
+            ),
+            "include_low_priority_events": include_low_priority_events,
+            "low_priority_threshold": DEFAULT_LLM_LOW_PRIORITY_THRESHOLD,
+        },
+        "event_packets_before_filter": before_filter,
         "event_packet_count": len(bounded_packets),
-        "event_packets_truncated": len(packets) > len(bounded_packets),
+        "event_packets_truncated": before_filter > len(bounded_packets),
+        "packets_dropped_low_priority": sum(
+            float(packet["attention_score"])
+            < DEFAULT_LLM_LOW_PRIORITY_THRESHOLD
+            for packet in packets
+        )
+        if not include_low_priority_events
+        else 0,
+        "unclassified_source_quality_count": sum(
+            packet["source_quality"]["label"] == "unknown_unclassified"
+            for packet in bounded_packets
+        ),
+        "multisource_event_count": sum(
+            int(packet["source_count"]) > 1
+            for packet in bounded_packets
+        ),
+        "attention_score_range": {
+            "min": round(min(attention_scores), 2)
+            if attention_scores
+            else None,
+            "max": round(max(attention_scores), 2)
+            if attention_scores
+            else None,
+        },
         "event_packets": bounded_packets,
         "ticker_packet_count": len(ticker_packets),
         "ticker_packets": ticker_packets,
+        "top_monitor_candidate_count": len(top_monitor_candidates),
+        "top_monitor_candidates": top_monitor_candidates,
     }
+
+
+def llm_event_priority_score(
+    packet: Mapping[str, object],
+) -> tuple[float, list[str]]:
+    score = 0.0
+    reasons: list[str] = []
+    group = str(packet.get("portfolio_watchlist_status") or "")
+    if group == "portfolio":
+        score += 22.0
+        reasons.append("portfolio_holding")
+    elif group == "watchlist":
+        score += 10.0
+        reasons.append("watchlist_name")
+
+    event_status = str(packet.get("new_repeated_status") or "")
+    if event_status == "fuzzy_event_repeat":
+        score += 14.0
+        reasons.append("developing_fuzzy_repeat")
+    elif event_status == "exact_url_repeat":
+        score += 10.0
+        reasons.append("developing_exact_repeat")
+    elif event_status == "likely_new_event":
+        score += 8.0
+        reasons.append("likely_new_event")
+
+    quality = packet.get("source_quality")
+    quality_tier = (
+        int(quality.get("tier") or 0)
+        if isinstance(quality, Mapping)
+        else 0
+    )
+    quality_points = {1: 18.0, 2: 10.0, 3: 1.0, 4: -20.0}
+    score += quality_points.get(quality_tier, -3.0)
+    reasons.append(f"source_quality_tier_{quality_tier or 'unknown'}")
+
+    source_count = max(1, int(packet.get("source_count") or 1))
+    if source_count > 1:
+        score += min(15.0, (source_count - 1) * 5.0)
+        reasons.append("multi_source_support")
+
+    sentiment_change = packet.get("sentiment_change")
+    if sentiment_change is not None:
+        change_points = min(15.0, abs(float(sentiment_change)) * 50.0)
+        score += change_points
+        if change_points >= 2.5:
+            reasons.append("meaningful_sentiment_change")
+
+    if bool(packet.get("official_signal")):
+        score += 20.0
+        reasons.append("official_or_sec_signal")
+    if bool(packet.get("benchmark_disagreement")):
+        score += 8.0
+        reasons.append("benchmark_disagreement")
+
+    article_type = str(packet.get("article_type") or "unknown")
+    seriousness = float(ARTICLE_TYPE_SERIOUSNESS.get(article_type, 0))
+    score += seriousness
+    if seriousness >= 10:
+        reasons.append("high_importance_article_type")
+    elif seriousness < 0:
+        reasons.append("low_importance_article_type")
+
+    source_family = str(packet.get("source_family") or "")
+    if source_family == "google_news_backstop":
+        score -= 5.0
+        reasons.append("google_backstop_penalty")
+
+    uncertainty = tuple(packet.get("uncertainty") or ())
+    if uncertainty:
+        score -= min(18.0, len(uncertainty) * 3.0)
+        reasons.append("uncertainty_penalty")
+    return round(max(0.0, score), 2), reasons
+
+
+def classify_llm_source_quality(article: Article) -> SourceQuality:
+    quality = assess_article_source(article)
+    if quality.label != UNKNOWN_SOURCE_LABEL:
+        return quality
+    return _llm_source_family_quality(
+        str(article.metadata.get("source_family") or ""),
+        publisher=quality.publisher,
+        domain=quality.domain,
+        fallback=quality,
+    )
 
 
 def load_llm_briefing_run(run_dir: str | Path) -> LlmBriefingRunData:
@@ -603,27 +769,84 @@ def _parse_date(value: str | None) -> date | None:
 
 
 def _packet_sort_key(packet: Mapping[str, object]) -> tuple[object, ...]:
-    status_rank = {
-        "likely_new_event": 0,
-        "fuzzy_event_repeat": 1,
-        "exact_url_repeat": 2,
-        "history_building": 3,
-    }
     group_rank = {
         "portfolio": 0,
         "watchlist": 1,
         "untracked": 2,
     }
     return (
+        -float(packet.get("attention_score") or 0.0),
         group_rank.get(
             str(packet.get("portfolio_watchlist_status") or ""),
             3,
         ),
-        status_rank.get(str(packet.get("new_repeated_status") or ""), 4),
-        -abs(float(packet.get("sentiment_change") or 0.0)),
-        -abs(float(packet.get("sentiment_score") or 0.0)),
         str(packet.get("ticker") or ""),
         str((packet.get("top_titles") or [""])[0]),
+    )
+
+
+def _select_event_packets(
+    packets: Sequence[Mapping[str, object]],
+    *,
+    max_event_packets: int,
+    max_events_per_ticker: int,
+    include_low_priority_events: bool,
+) -> list[Mapping[str, object]]:
+    global_limit = max(1, int(max_event_packets))
+    ticker_limit = max(1, int(max_events_per_ticker))
+    eligible = [
+        packet
+        for packet in packets
+        if include_low_priority_events
+        or float(packet.get("attention_score") or 0.0)
+        >= DEFAULT_LLM_LOW_PRIORITY_THRESHOLD
+    ]
+    eligible.sort(key=_packet_sort_key)
+    selected: list[Mapping[str, object]] = []
+    selected_ids: set[int] = set()
+    counts_by_ticker: dict[str, int] = {}
+
+    meaningful_portfolio = [
+        packet
+        for packet in eligible
+        if packet.get("portfolio_watchlist_status") == "portfolio"
+        and _is_meaningful_change(packet)
+    ]
+    for packet in meaningful_portfolio:
+        ticker = str(packet.get("ticker") or "")
+        if counts_by_ticker.get(ticker, 0) >= ticker_limit:
+            continue
+        selected.append(packet)
+        selected_ids.add(id(packet))
+        counts_by_ticker[ticker] = counts_by_ticker.get(ticker, 0) + 1
+        if len(selected) >= global_limit:
+            return selected
+
+    for packet in eligible:
+        if id(packet) in selected_ids:
+            continue
+        ticker = str(packet.get("ticker") or "")
+        if counts_by_ticker.get(ticker, 0) >= ticker_limit:
+            continue
+        selected.append(packet)
+        counts_by_ticker[ticker] = counts_by_ticker.get(ticker, 0) + 1
+        if len(selected) >= global_limit:
+            break
+    selected.sort(key=_packet_sort_key)
+    return selected
+
+
+def _is_meaningful_change(packet: Mapping[str, object]) -> bool:
+    sentiment_change = packet.get("sentiment_change")
+    return (
+        sentiment_change is not None
+        and abs(float(sentiment_change)) >= 0.05
+    ) or bool(packet.get("official_signal")) or (
+        ARTICLE_TYPE_SERIOUSNESS.get(
+            str(packet.get("article_type") or "unknown"),
+            0,
+        )
+        >= 10
     )
 
 
@@ -668,9 +891,109 @@ def _build_ticker_packets(
                     4,
                 ),
                 "sentiment_change": first.get("sentiment_change"),
+                "max_attention_score": max(
+                    float(packet.get("attention_score") or 0.0)
+                    for _, packet in indexed_packets
+                ),
             }
         )
     return ticker_packets
+
+
+def _top_monitor_candidates(
+    ticker_packets: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    ranked = sorted(
+        ticker_packets,
+        key=lambda packet: (
+            -float(packet.get("max_attention_score") or 0.0),
+            -int(packet.get("event_count") or 0),
+            str(packet.get("ticker") or ""),
+        ),
+    )
+    return [
+        {
+            "ticker": str(packet.get("ticker") or ""),
+            "company": str(packet.get("company") or ""),
+            "portfolio_watchlist_status": str(
+                packet.get("portfolio_watchlist_status") or ""
+            ),
+            "attention_score": float(
+                packet.get("max_attention_score") or 0.0
+            ),
+            "event_count": int(packet.get("event_count") or 0),
+        }
+        for packet in ranked[:DEFAULT_LLM_TOP_MONITOR_CANDIDATES]
+    ]
+
+
+def _is_official_signal(record: EventMemoryRecord) -> bool:
+    return (
+        record.source_family
+        in {"regulatory_official", "company_investor_relations"}
+        or record.article_type == "filing_or_sec_event"
+        or record.event_type
+        in {
+            "8-k_material_event",
+            "10-q_quarterly_report",
+            "10-k_annual_report",
+            "6-k_foreign_issuer_report",
+            "ownership_event",
+            "proxy_event",
+            "registration_event",
+            "offering_or_prospectus",
+        }
+    )
+
+
+def _benchmark_disagreement(record: EventMemoryRecord) -> bool:
+    if (
+        record.external_sentiment_provider != "alpha_vantage_news"
+        or record.external_sentiment is None
+    ):
+        return False
+    internal = float(record.internal_sentiment)
+    external = float(record.external_sentiment)
+    return (
+        internal * external < 0
+        or abs(internal - external) >= 0.35
+    )
+
+
+def _llm_source_family_quality(
+    source_family: str,
+    *,
+    publisher: str = "",
+    domain: str = "",
+    fallback: SourceQuality | None = None,
+) -> SourceQuality:
+    family = str(source_family or "").strip()
+    if family in LLM_TIER_1_SOURCE_FAMILIES:
+        tier = TIER_1_HIGH_TRUST
+        reason = f"trusted_source_family:{family}"
+    elif family in LLM_TIER_2_SOURCE_FAMILIES:
+        tier = TIER_2_USABLE
+        reason = f"usable_source_family:{family}"
+    elif family in LLM_TIER_3_SOURCE_FAMILIES:
+        tier = TIER_3_LOW_PRIORITY
+        reason = f"low_priority_source_family:{family}"
+    else:
+        return fallback or SourceQuality(
+            tier=TIER_2_USABLE,
+            label=UNKNOWN_SOURCE_LABEL,
+            reason="unclassified_source",
+            publisher=publisher,
+            domain=domain,
+            excluded_by_default=False,
+        )
+    return SourceQuality(
+        tier=tier,
+        label=TIER_LABELS[tier],
+        reason=reason,
+        publisher=publisher,
+        domain=domain,
+        excluded_by_default=False,
+    )
 
 
 def _read_json_list(path: Path, *, label: str) -> list[Mapping[str, object]]:

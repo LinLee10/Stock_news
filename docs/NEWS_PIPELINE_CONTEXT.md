@@ -53,6 +53,8 @@ The production pipeline currently includes:
     from compact event packets rather than raw article bodies.
 27. Estimate-only LLM briefing replay from an explicit prior run or the latest
     populated artifact run, without recollecting sources.
+28. Priority-scored and capped LLM event selection with per-ticker limits,
+    source-family quality classification, and compact monitor candidates.
 
 ## API And Source State
 
@@ -187,18 +189,36 @@ unless `--llm-confirm-call` is explicitly present.
 Packets include ticker/company identity, portfolio or watchlist status, event
 and article types, new/repeated classification, similarity, days active,
 sentiment and change, source quality/count, selected titles/URLs, and
-uncertainty. Ticker packets summarize the included event packet indexes,
-new/repeated counts, and average sentiment for each tracked name. Diagnostics
-report event and ticker packet counts, source run, estimated input/output
-tokens, estimated cost, and the tier cap. Raw full article text is excluded by
-default. Future actual
+uncertainty. Each event receives a deterministic attention score using
+portfolio/watchlist status, new versus developing status, source quality and
+count, sentiment change, official/SEC evidence, Alpha Vantage disagreement,
+article-type importance, Google-backstop penalties, and uncertainty.
+
+The default packet policy keeps meaningful portfolio evidence first, then
+fills with the highest-scoring watchlist and monitor evidence. It caps the
+input at 60 events and three events per ticker before token estimation.
+`--llm-max-event-packets` and `--llm-max-events-per-ticker` adjust those caps.
+Low-priority events are excluded unless
+`--llm-include-low-priority-events` is explicitly enabled. Known source
+families classify regulatory/IR sources as high trust, direct/API/wire sources
+as usable, and Google News backstop records as low priority instead of leaving
+them unclassified.
+
+Ticker packets summarize the included event packet indexes, new/repeated
+counts, average sentiment, and maximum attention score for each tracked name.
+The input also includes up to five overall monitor candidates. Diagnostics
+report before/after packet counts, low-priority drops, unclassified and
+multi-source counts, monitor count, attention-score range, source run,
+estimated input/output tokens, estimated cost, and the tier cap. Raw full
+article text is excluded by default. Future actual
 responses use a strict structured JSON schema with portfolio pulse, changed
 holdings, watchlist activations, monitor names, repeated/new event synthesis,
 uncertainty, evidence, and an explicit no-advice section.
 
-The next recommended phase for this layer is to inspect a populated replay's
-event/ticker selection, evidence density, uncertainty labels, and token/cost
-diagnostics. A live call should remain a separately approved manual validation
+The next recommended phase for this layer is to inspect the top retained and
+dropped events from a populated replay, especially portfolio preservation,
+watchlist activation quality, source-family classification, and uncertainty
+penalties. A live call should remain a separately approved manual validation
 after packet quality is accepted.
 
 ## Event And Sentiment Memory

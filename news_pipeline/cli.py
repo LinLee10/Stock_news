@@ -65,6 +65,8 @@ from .event_memory import (
 )
 from .llm_briefing import (
     DEFAULT_LLM_BRIEFING_TIER,
+    DEFAULT_MAX_LLM_EVENT_PACKETS,
+    DEFAULT_MAX_LLM_EVENTS_PER_TICKER,
     LLM_BRIEFING_TIERS,
     LlmBriefingArtifactError,
     LlmBriefingClient,
@@ -895,6 +897,36 @@ def main(
                 "llm_briefing_event_packet_count",
                 0,
             ),
+            "llm_event_packets_before_filter": live_rss_summary.get(
+                "llm_event_packets_before_filter",
+                0,
+            ),
+            "llm_event_packets_after_filter": live_rss_summary.get(
+                "llm_event_packets_after_filter",
+                0,
+            ),
+            "llm_packets_dropped_low_priority": live_rss_summary.get(
+                "llm_packets_dropped_low_priority",
+                0,
+            ),
+            "llm_unclassified_source_quality_count": (
+                live_rss_summary.get(
+                    "llm_unclassified_source_quality_count",
+                    0,
+                )
+            ),
+            "llm_multisource_event_count": live_rss_summary.get(
+                "llm_multisource_event_count",
+                0,
+            ),
+            "llm_top_monitor_candidate_count": live_rss_summary.get(
+                "llm_top_monitor_candidate_count",
+                0,
+            ),
+            "llm_attention_score_range": live_rss_summary.get(
+                "llm_attention_score_range",
+                {},
+            ),
             "llm_briefing_estimated_input_tokens": live_rss_summary.get(
                 "llm_briefing_estimated_input_tokens",
                 0,
@@ -1199,6 +1231,21 @@ def _add_live_rss_args(
         action="store_true",
         default=False,
     )
+    parser.add_argument(
+        "--llm-max-event-packets",
+        type=int,
+        default=DEFAULT_MAX_LLM_EVENT_PACKETS,
+    )
+    parser.add_argument(
+        "--llm-max-events-per-ticker",
+        type=int,
+        default=DEFAULT_MAX_LLM_EVENTS_PER_TICKER,
+    )
+    parser.add_argument(
+        "--llm-include-low-priority-events",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
     parser.add_argument("--llm-briefing-from-run")
     parser.add_argument(
         "--llm-briefing-from-latest-populated-run",
@@ -1332,6 +1379,23 @@ def _safe_context(
         ),
         "llm_call_confirmed": bool(
             getattr(args, "llm_confirm_call", False)
+        ),
+        "llm_max_event_packets": int(
+            getattr(
+                args,
+                "llm_max_event_packets",
+                DEFAULT_MAX_LLM_EVENT_PACKETS,
+            )
+        ),
+        "llm_max_events_per_ticker": int(
+            getattr(
+                args,
+                "llm_max_events_per_ticker",
+                DEFAULT_MAX_LLM_EVENTS_PER_TICKER,
+            )
+        ),
+        "llm_include_low_priority_events": bool(
+            getattr(args, "llm_include_low_priority_events", False)
         ),
         "llm_briefing_from_run": str(
             getattr(args, "llm_briefing_from_run", "") or ""
@@ -2088,6 +2152,17 @@ def _run_llm_briefing_stage(
         comparison=comparison,
         run_date=briefing_run_date or args.run_date,
         tier=tier,
+        max_event_packets=max(
+            1,
+            int(args.llm_max_event_packets),
+        ),
+        max_events_per_ticker=max(
+            1,
+            int(args.llm_max_events_per_ticker),
+        ),
+        include_low_priority_events=bool(
+            args.llm_include_low_priority_events
+        ),
     )
     estimate = estimate_llm_briefing_cost(input_payload, tier)
     estimate_only = (
@@ -2138,7 +2213,25 @@ def _run_llm_briefing_stage(
         "tier": tier.as_dict(),
         "estimate": estimate.as_dict(),
         "event_packet_count": input_payload["event_packet_count"],
+        "event_packets_before_filter": input_payload[
+            "event_packets_before_filter"
+        ],
+        "packets_dropped_low_priority": input_payload[
+            "packets_dropped_low_priority"
+        ],
         "ticker_packet_count": input_payload["ticker_packet_count"],
+        "unclassified_source_quality_count": input_payload[
+            "unclassified_source_quality_count"
+        ],
+        "multisource_event_count": input_payload[
+            "multisource_event_count"
+        ],
+        "top_monitor_candidate_count": input_payload[
+            "top_monitor_candidate_count"
+        ],
+        "attention_score_range": input_payload[
+            "attention_score_range"
+        ],
         "input_source_run": input_source_run,
         "event_packets_truncated": input_payload[
             "event_packets_truncated"
@@ -2164,10 +2257,31 @@ def _run_llm_briefing_stage(
             "event_packet_count"
         ],
         "llm_event_packet_count": input_payload["event_packet_count"],
+        "llm_event_packets_before_filter": input_payload[
+            "event_packets_before_filter"
+        ],
+        "llm_event_packets_after_filter": input_payload[
+            "event_packet_count"
+        ],
+        "llm_packets_dropped_low_priority": input_payload[
+            "packets_dropped_low_priority"
+        ],
         "llm_briefing_ticker_packet_count": input_payload[
             "ticker_packet_count"
         ],
         "llm_ticker_packet_count": input_payload["ticker_packet_count"],
+        "llm_unclassified_source_quality_count": input_payload[
+            "unclassified_source_quality_count"
+        ],
+        "llm_multisource_event_count": input_payload[
+            "multisource_event_count"
+        ],
+        "llm_top_monitor_candidate_count": input_payload[
+            "top_monitor_candidate_count"
+        ],
+        "llm_attention_score_range": input_payload[
+            "attention_score_range"
+        ],
         "llm_input_source_run": input_source_run,
         "llm_briefing_event_packets_truncated": input_payload[
             "event_packets_truncated"
