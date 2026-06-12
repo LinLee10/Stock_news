@@ -25,7 +25,7 @@ from .benchmarking import (
     benchmark_rows_with_ticker_summary,
     build_alpha_vantage_benchmarks,
 )
-from .dedup import cluster_articles
+from .dedup import DedupeCluster, cluster_articles
 from .email_preview import PreviewEmailSender
 from .email_sender import (
     DEFAULT_EMAIL_ATTACHMENT_NAMES,
@@ -52,6 +52,8 @@ from .event_memory import (
     DEFAULT_EVENT_MEMORY_LOOKBACK_DAYS,
     DEFAULT_EVENT_REVIEW_MAX_PAIRS,
     DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN,
+    EventMemoryComparison,
+    EventMemoryRecord,
     alpha_vantage_selection_history,
     build_event_pair_review,
     build_event_memory_records,
@@ -60,6 +62,17 @@ from .event_memory import (
     sec_event_candidate_rows,
     write_event_pair_review_artifacts,
     write_event_memory_artifacts,
+)
+from .llm_briefing import (
+    DEFAULT_LLM_BRIEFING_TIER,
+    LLM_BRIEFING_TIERS,
+    LlmBriefingClient,
+    OpenAIResponsesClient,
+    briefing_response_schema,
+    build_llm_briefing_input,
+    estimate_llm_briefing_cost,
+    get_llm_briefing_tier,
+    write_llm_briefing_artifacts,
 )
 from .models import Article, ArticleSource, RunResult, SentimentResult, TickerMention
 from .provider_registry import iter_provider_configs
@@ -134,7 +147,10 @@ DEFAULT_MAX_EMAIL_STORIES = 60
 DEFAULT_MAX_RANKED_READS_PER_TICKER = 3
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(
+    *,
+    default_llm_briefing_tier: str = DEFAULT_LLM_BRIEFING_TIER,
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="news-pipeline")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -153,7 +169,10 @@ def build_parser() -> argparse.ArgumentParser:
         if command == "init-db":
             subparser.add_argument("--database-path")
         if command == "dry-run-daily":
-            _add_live_rss_args(subparser)
+            _add_live_rss_args(
+                subparser,
+                default_llm_briefing_tier=default_llm_briefing_tier,
+            )
             _add_live_article_fetch_args(subparser)
             _add_source_quality_args(subparser)
             subparser.add_argument("--run-id")
@@ -192,9 +211,14 @@ def main(
     provider_checker: ProviderChecker | None = None,
     environ: Mapping[str, str] | None = None,
     email_sender: EmailSender | None = None,
+    llm_client: LlmBriefingClient | None = None,
 ) -> int:
     runtime_environ, dotenv_status = load_cli_environment(environ)
-    parser = build_parser()
+    parser = build_parser(
+        default_llm_briefing_tier=_configured_default_llm_tier(
+            runtime_environ
+        )
+    )
     args = parser.parse_args(argv)
 
     output_dir = _run_output_dir(args.artifacts_dir, args.run_date)
@@ -588,6 +612,16 @@ def main(
                     **event_pair_review.diagnostics(),
                 }
             )
+            llm_briefing_diagnostics = _run_llm_briefing_stage(
+                args,
+                output_dir=output_dir,
+                records=event_memory_records,
+                clusters=clusters,
+                comparison=event_memory_comparison,
+                environ=runtime_environ,
+                client=llm_client,
+            )
+            live_rss_summary.update(llm_briefing_diagnostics)
 
             store.record_run(
                 RunResult(
@@ -827,6 +861,61 @@ def main(
                 "sentiment_change_since_prior_run",
                 {},
             ),
+            "llm_briefing_enabled": live_rss_summary.get(
+                "llm_briefing_enabled",
+                False,
+            ),
+            "llm_briefing_status": live_rss_summary.get(
+                "llm_briefing_status",
+                "disabled",
+            ),
+            "llm_briefing_tier": live_rss_summary.get(
+                "llm_briefing_tier",
+                DEFAULT_LLM_BRIEFING_TIER,
+            ),
+            "llm_briefing_model": live_rss_summary.get(
+                "llm_briefing_model",
+            ),
+            "llm_briefing_event_packet_count": live_rss_summary.get(
+                "llm_briefing_event_packet_count",
+                0,
+            ),
+            "llm_briefing_estimated_input_tokens": live_rss_summary.get(
+                "llm_briefing_estimated_input_tokens",
+                0,
+            ),
+            "llm_briefing_reserved_output_tokens": live_rss_summary.get(
+                "llm_briefing_reserved_output_tokens",
+                0,
+            ),
+            "llm_briefing_estimated_cost_usd": live_rss_summary.get(
+                "llm_briefing_estimated_cost_usd",
+                0.0,
+            ),
+            "llm_briefing_cost_cap_usd": live_rss_summary.get(
+                "llm_briefing_cost_cap_usd",
+                0.0,
+            ),
+            "llm_briefing_blocked_reason": live_rss_summary.get(
+                "llm_briefing_blocked_reason",
+            ),
+            "llm_briefing_call_attempted": live_rss_summary.get(
+                "llm_briefing_call_attempted",
+                False,
+            ),
+            "llm_briefing_call_completed": live_rss_summary.get(
+                "llm_briefing_call_completed",
+                False,
+            ),
+            "llm_briefing_input": live_rss_summary.get(
+                "llm_briefing_input",
+            ),
+            "llm_briefing_preview": live_rss_summary.get(
+                "llm_briefing_preview",
+            ),
+            "llm_briefing_output": live_rss_summary.get(
+                "llm_briefing_output",
+            ),
             "extraction_queue_size": article_fetch_summary.extraction_queue_size,
             "extraction_selected_count": article_fetch_summary.extraction_selected_count,
             "extraction_skipped_count": article_fetch_summary.extraction_skipped_count,
@@ -1024,7 +1113,11 @@ def _add_safe_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--enable-email-send", action="store_true", default=False)
 
 
-def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
+def _add_live_rss_args(
+    parser: argparse.ArgumentParser,
+    *,
+    default_llm_briefing_tier: str = DEFAULT_LLM_BRIEFING_TIER,
+) -> None:
     parser.add_argument("--enable-live-rss", action="store_true", default=False)
     parser.add_argument("--live-rss-url", action="append", default=None)
     parser.add_argument("--live-rss-timeout-seconds", type=float, default=DEFAULT_LIVE_RSS_TIMEOUT_SECONDS)
@@ -1070,6 +1163,26 @@ def _add_live_rss_args(parser: argparse.ArgumentParser) -> None:
         "--event-review-near-miss-margin",
         type=float,
         default=DEFAULT_EVENT_REVIEW_NEAR_MISS_MARGIN,
+    )
+    parser.add_argument(
+        "--enable-llm-briefing",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--llm-briefing-tier",
+        choices=tuple(LLM_BRIEFING_TIERS),
+        default=default_llm_briefing_tier,
+    )
+    parser.add_argument(
+        "--llm-estimate-cost-only",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--llm-confirm-call",
+        action="store_true",
+        default=False,
     )
     parser.add_argument("--max-email-stories", type=int, default=DEFAULT_MAX_EMAIL_STORIES)
     parser.add_argument(
@@ -1183,6 +1296,22 @@ def _safe_context(
             False,
         ),
         "email_send_enabled": getattr(args, "enable_email_send", False),
+        "llm_briefing_enabled": bool(
+            getattr(args, "enable_llm_briefing", False)
+        ),
+        "llm_briefing_tier": str(
+            getattr(
+                args,
+                "llm_briefing_tier",
+                DEFAULT_LLM_BRIEFING_TIER,
+            )
+        ),
+        "llm_estimate_cost_only": bool(
+            getattr(args, "llm_estimate_cost_only", False)
+        ),
+        "llm_call_confirmed": bool(
+            getattr(args, "llm_confirm_call", False)
+        ),
         "live_rss_enabled": bool(getattr(args, "enable_live_rss", False)),
         "live_article_fetch_enabled": bool(getattr(args, "enable_live_article_fetch", False)),
         "include_low_quality_sources": bool(getattr(args, "include_low_quality_sources", False)),
@@ -1257,6 +1386,17 @@ def _safe_context(
 
 def _today_local_iso() -> str:
     return date.today().isoformat()
+
+
+def _configured_default_llm_tier(
+    environ: Mapping[str, str],
+) -> str:
+    configured = str(
+        environ.get("OPENAI_BRIEFING_DEFAULT_TIER") or ""
+    ).strip()
+    if configured in {"daily", "strong"}:
+        return configured
+    return DEFAULT_LLM_BRIEFING_TIER
 
 
 def _send_daily_report(
@@ -1878,6 +2018,130 @@ def _canonical_articles(articles: list[Article]) -> list[Article]:
 
 def _is_paid_provider(provider_name: str) -> bool:
     return provider_name in {"alpha_vantage", "marketaux", "gnews", "finnhub_news"}
+
+
+def _run_llm_briefing_stage(
+    args: argparse.Namespace,
+    *,
+    output_dir: Path,
+    records: Sequence[EventMemoryRecord],
+    clusters: Sequence[DedupeCluster],
+    comparison: EventMemoryComparison,
+    environ: Mapping[str, str],
+    client: LlmBriefingClient | None,
+) -> dict[str, object]:
+    enabled = bool(getattr(args, "enable_llm_briefing", False))
+    tier_name = str(
+        getattr(
+            args,
+            "llm_briefing_tier",
+            DEFAULT_LLM_BRIEFING_TIER,
+        )
+    )
+    if not enabled:
+        return {
+            "llm_briefing_enabled": False,
+            "llm_briefing_status": "disabled",
+            "llm_briefing_tier": tier_name,
+            "llm_briefing_call_attempted": False,
+            "llm_briefing_call_completed": False,
+        }
+
+    tier = get_llm_briefing_tier(tier_name)
+    input_payload = build_llm_briefing_input(
+        records=records,
+        clusters=clusters,
+        comparison=comparison,
+        run_date=args.run_date,
+        tier=tier,
+    )
+    estimate = estimate_llm_briefing_cost(input_payload, tier)
+    estimate_only = bool(getattr(args, "llm_estimate_cost_only", False))
+    confirmed = bool(getattr(args, "llm_confirm_call", False))
+    status = "confirmation_required"
+    call_attempted = False
+    call_completed = False
+    output_path = None
+    blocked_reason = estimate.blocked_reason
+
+    if estimate.blocked:
+        status = "blocked"
+    elif estimate_only:
+        status = "estimate_only"
+    elif not confirmed:
+        status = "confirmation_required"
+        blocked_reason = "llm_confirm_call_required"
+    else:
+        api_key = str(environ.get("OPENAI_API_KEY") or "").strip()
+        if not api_key:
+            status = "missing_api_key"
+            blocked_reason = "OPENAI_API_KEY_missing"
+        else:
+            call_attempted = True
+            try:
+                active_client = client or OpenAIResponsesClient(api_key)
+                response = active_client.create_briefing(
+                    model=tier.model,
+                    input_payload=input_payload,
+                    response_schema=briefing_response_schema(),
+                    max_output_tokens=tier.max_output_tokens,
+                )
+                output_path = _write_json(
+                    output_dir / "llm_briefing_output.json",
+                    response,
+                )
+                status = "completed"
+                call_completed = True
+            except Exception as exc:
+                status = "call_failed"
+                blocked_reason = f"call_failed:{type(exc).__name__}"
+
+    preview_payload = {
+        "status": status,
+        "tier": tier.as_dict(),
+        "estimate": estimate.as_dict(),
+        "event_packet_count": input_payload["event_packet_count"],
+        "event_packets_truncated": input_payload[
+            "event_packets_truncated"
+        ],
+        "response_schema": briefing_response_schema(),
+        "call_confirmed": confirmed,
+        "call_attempted": call_attempted,
+        "call_completed": call_completed,
+        "blocked_reason": blocked_reason,
+        "output_artifact": output_path,
+    }
+    input_path, preview_path = write_llm_briefing_artifacts(
+        output_dir=output_dir,
+        input_payload=input_payload,
+        preview_payload=preview_payload,
+    )
+    return {
+        "llm_briefing_enabled": True,
+        "llm_briefing_status": status,
+        "llm_briefing_tier": tier.name,
+        "llm_briefing_model": tier.model,
+        "llm_briefing_event_packet_count": input_payload[
+            "event_packet_count"
+        ],
+        "llm_briefing_event_packets_truncated": input_payload[
+            "event_packets_truncated"
+        ],
+        "llm_briefing_estimated_input_tokens": (
+            estimate.estimated_input_tokens
+        ),
+        "llm_briefing_reserved_output_tokens": (
+            estimate.reserved_output_tokens
+        ),
+        "llm_briefing_estimated_cost_usd": estimate.estimated_cost_usd,
+        "llm_briefing_cost_cap_usd": estimate.cost_cap_usd,
+        "llm_briefing_blocked_reason": blocked_reason,
+        "llm_briefing_call_attempted": call_attempted,
+        "llm_briefing_call_completed": call_completed,
+        "llm_briefing_input": input_path,
+        "llm_briefing_preview": preview_path,
+        "llm_briefing_output": output_path,
+    }
 
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> str:

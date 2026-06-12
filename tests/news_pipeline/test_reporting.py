@@ -76,6 +76,9 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("12 rows", html)
             self.assertIn("near misses: 3", html)
             self.assertIn("likely new examples: 5", html)
+            self.assertIn("Optional LLM briefing:", html)
+            self.assertIn("status: disabled", html)
+            self.assertIn("call attempted: false", html)
             self.assertIn("NVDA: +0.1250", html)
 
     def test_csv_attachment_contains_expected_rows(self):
@@ -223,7 +226,7 @@ def _fake_report_input() -> DailyReportInput:
                 "fuzzy_event_repeat": 1,
                 "likely_new_event": 4,
             },
-            "event_similarity_threshold": 0.78,
+            "event_similarity_threshold": 0.75,
             "event_memory_lookback_days": 3,
             "prior_runs_considered": (
                 {"run_id": "run-2026-06-09", "run_date": "2026-06-09"},

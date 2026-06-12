@@ -49,6 +49,8 @@ The production pipeline currently includes:
 23. Cross-run exact and fuzzy event identity matching.
 24. Capped event-pair review artifacts for fuzzy-threshold calibration.
 25. Offline labeled event-pair calibration across configurable thresholds.
+26. An optional, cost-capped OpenAI portfolio/watchlist briefing layer built
+    from compact event packets rather than raw article bodies.
 
 ## API And Source State
 
@@ -61,6 +63,7 @@ names may include:
 - `FINNHUB_KEY`
 - `NEWSAPI_KEY`
 - `ALPHA_VANTAGE_KEY`
+- `OPENAI_API_KEY`
 
 Never use Alpaca or other trading keys for this project.
 
@@ -102,8 +105,9 @@ source-layer risks include:
   coverage gaps, and known weak-coverage names.
 - Cross-run event identity uses exact ticker/canonical-URL matching first, then
   bounded fuzzy title matching for the same ticker within a configurable
-  publication window. The default lookback is three days. Generic or weak
-  titles can still produce uncertain classifications.
+  publication window. The default lookback is three days and the calibrated
+  production similarity threshold is 0.75. Generic or weak titles can still
+  produce uncertain classifications.
 
 The Alpha Vantage News Sentiment benchmark and initial durable event memory are
 implemented in the current worktree. Alpha Vantage request allocation now
@@ -120,12 +124,55 @@ likely new events. Each run also writes capped JSON and CSV review artifacts
 containing exact matches, fuzzy matches, near-misses, and likely-new examples
 with blank reviewer labels.
 
-The next recommended phase is to label a representative event-pair sample, run
-the offline calibration command, review precision/recall tradeoffs, and approve
-a production threshold in a separately scoped change. Historical
-duplicate-event consolidation should follow before multi-run sentiment
-baselining. Multi-run sentiment trends, benchmark calibration, and deeper SEC
-filing parsing remain later phases.
+Manual calibration used 123 labeled pairs and 4 ignored pairs. Threshold 0.75
+produced precision 0.9655, recall 0.9032, and F1 0.9333, and is now the
+production fuzzy-match threshold.
+
+The next recommended phase is to validate threshold 0.75 across additional
+dated runs and monitor false-positive fuzzy matches. Historical duplicate-event
+consolidation should follow before multi-run sentiment baselining. Multi-run
+sentiment trends, benchmark calibration, and deeper SEC filing parsing remain
+later phases.
+
+## Optional OpenAI Briefing
+
+The production CLI has an optional OpenAI briefing layer for explaining
+material portfolio and watchlist changes. It is disabled by default and is
+informational only: prompts and response schemas prohibit buy, sell,
+allocation, price-target, and trading advice.
+
+The built-in tiers are:
+
+- `daily`: `gpt-5.4-mini`, 60,000 input tokens, 5,000 output tokens, and a
+  $0.25 estimated-cost cap.
+- `strong`: `gpt-5.4`, 80,000 input tokens, 7,000 output tokens, and a $1.00
+  estimated-cost cap.
+- `premium`: `gpt-5.5`, 100,000 input tokens, 10,000 output tokens, and a
+  $3.00 estimated-cost cap. Premium must be selected explicitly for a manual
+  one-off run.
+
+`--enable-llm-briefing` builds compact evidence packets and writes
+`llm_briefing_input.json` plus `llm_briefing_preview.json`. It does not call
+OpenAI unless `--llm-confirm-call` is also present. Estimate-only validation
+uses `--llm-estimate-cost-only`, never requires `OPENAI_API_KEY`, and never
+makes an API call. Before any confirmed call, the CLI estimates input tokens,
+reserves the tier's full output-token allowance, estimates cost using the
+configured standard token rates, and blocks requests that exceed the input
+limit or cost cap. `OPENAI_API_KEY` is read only in the enabled, confirmed,
+non-estimate, non-blocked path.
+
+Packets include ticker/company identity, portfolio or watchlist status, event
+and article types, new/repeated classification, similarity, days active,
+sentiment and change, source quality/count, selected titles/URLs, and
+uncertainty. Raw full article text is excluded by default. Future actual
+responses use a strict structured JSON schema with portfolio pulse, changed
+holdings, watchlist activations, monitor names, repeated/new event synthesis,
+uncertainty, evidence, and an explicit no-advice section.
+
+The next recommended phase for this layer is to review estimate-only packet
+quality and token/cost diagnostics across representative runs. A live call
+should remain a separately approved manual validation after packet quality is
+accepted.
 
 ## Event And Sentiment Memory
 
@@ -155,6 +202,10 @@ prior runs, and prior record count are reported in diagnostics. Comparisons
 record exact URL repeats, fuzzy repeats, likely new events, and per-ticker
 changes in average internal sentiment. Same-day reruns are intentionally not
 treated as an earlier reporting period.
+
+The production fuzzy-match threshold is 0.75, selected from manual calibration
+of 123 labeled event pairs. The calibrated metrics were precision 0.9655,
+recall 0.9032, and F1 0.9333.
 
 `event_pair_review.json` and `event_pair_review.csv` are generated for manual
 calibration. Rows include the current/prior titles, URLs, timestamps, sources,
@@ -223,6 +274,10 @@ Do not add deep filing parsing unless explicitly requested.
 - External APIs must require explicit global/provider flags and bounded request
   budgets.
 - Make no paid or unflagged API calls.
+- OpenAI briefing calls require both `--enable-llm-briefing` and
+  `--llm-confirm-call`, and must pass the selected tier's token and cost caps.
+- Use `--llm-estimate-cost-only` for normal validation; it must never call
+  OpenAI or require an API key.
 - Do not add forecasting, price prediction, or trading execution unless a
   later prompt explicitly requests and scopes it.
 - Do not commit or push unless explicitly instructed.

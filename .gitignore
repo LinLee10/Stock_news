@@ -21,6 +21,7 @@ secrets/development.env
 *.env
 .env
 .env.*
+!.env.local.example
 secrets/*.env
 config/*.env
 

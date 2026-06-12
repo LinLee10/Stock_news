@@ -800,6 +800,14 @@ def _backend_pool_diagnostics_html(report_input: DailyReportInput) -> str:
             f"fuzzy: {int(diagnostics.get('fuzzy_review_pairs', 0))}; "
             f"near misses: {int(diagnostics.get('near_miss_review_pairs', 0))}; "
             f"likely new examples: {int(diagnostics.get('likely_new_review_examples', 0))}</p>",
+            "  <p><strong>Optional LLM briefing:</strong> "
+            f"status: {escape(str(diagnostics.get('llm_briefing_status') or 'disabled'))}; "
+            f"tier: {escape(str(diagnostics.get('llm_briefing_tier') or 'daily'))}; "
+            f"packets: {int(diagnostics.get('llm_briefing_event_packet_count', 0))}; "
+            f"estimated input tokens: {int(diagnostics.get('llm_briefing_estimated_input_tokens', 0))}; "
+            f"estimated cost: ${float(diagnostics.get('llm_briefing_estimated_cost_usd', 0.0)):.4f}; "
+            f"cap: ${float(diagnostics.get('llm_briefing_cost_cap_usd', 0.0)):.2f}; "
+            f"call attempted: {escape(str(bool(diagnostics.get('llm_briefing_call_attempted'))).lower())}</p>",
             f"  <p><strong>Alpha selection reasons:</strong> {escape(selection_reasons or 'none')}</p>",
             f"  <p><strong>Sentiment changes since prior run:</strong> {escape(sentiment_changes or 'none')}</p>",
             "  <table>",
