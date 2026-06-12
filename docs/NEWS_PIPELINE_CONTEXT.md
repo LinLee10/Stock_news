@@ -51,6 +51,8 @@ The production pipeline currently includes:
 25. Offline labeled event-pair calibration across configurable thresholds.
 26. An optional, cost-capped OpenAI portfolio/watchlist briefing layer built
     from compact event packets rather than raw article bodies.
+27. Estimate-only LLM briefing replay from an explicit prior run or the latest
+    populated artifact run, without recollecting sources.
 
 ## API And Source State
 
@@ -161,18 +163,43 @@ configured standard token rates, and blocks requests that exceed the input
 limit or cost cap. `OPENAI_API_KEY` is read only in the enabled, confirmed,
 non-estimate, non-blocked path.
 
+Briefing packet quality can be reviewed against existing structured run
+artifacts without running collection again:
+
+```bash
+python -B -m news_pipeline.cli dry-run-daily \
+  --artifacts-dir artifacts \
+  --enable-llm-briefing \
+  --llm-briefing-tier daily \
+  --llm-estimate-cost-only \
+  --llm-briefing-from-latest-populated-run
+```
+
+Use `--llm-briefing-from-run PATH` to select a specific dated run directory.
+The latest-populated option scans dated run directories newest-first and skips
+runs whose `event_memory_daily.json` contains no records. Replay reads durable
+event memory, dedupe cluster metadata, and event comparison diagnostics. It
+does not load article full-text artifacts, recollect sources, initialize a new
+run database, generate email, or call external APIs. If no populated run is
+available, the CLI exits with a clear error. Replay defaults to estimate-only
+unless `--llm-confirm-call` is explicitly present.
+
 Packets include ticker/company identity, portfolio or watchlist status, event
 and article types, new/repeated classification, similarity, days active,
 sentiment and change, source quality/count, selected titles/URLs, and
-uncertainty. Raw full article text is excluded by default. Future actual
+uncertainty. Ticker packets summarize the included event packet indexes,
+new/repeated counts, and average sentiment for each tracked name. Diagnostics
+report event and ticker packet counts, source run, estimated input/output
+tokens, estimated cost, and the tier cap. Raw full article text is excluded by
+default. Future actual
 responses use a strict structured JSON schema with portfolio pulse, changed
 holdings, watchlist activations, monitor names, repeated/new event synthesis,
 uncertainty, evidence, and an explicit no-advice section.
 
-The next recommended phase for this layer is to review estimate-only packet
-quality and token/cost diagnostics across representative runs. A live call
-should remain a separately approved manual validation after packet quality is
-accepted.
+The next recommended phase for this layer is to inspect a populated replay's
+event/ticker selection, evidence density, uncertainty labels, and token/cost
+diagnostics. A live call should remain a separately approved manual validation
+after packet quality is accepted.
 
 ## Event And Sentiment Memory
 

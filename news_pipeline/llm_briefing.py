@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 from urllib.request import Request, urlopen
 
-from .dedup import DedupeCluster
+from .dedup import DedupeCluster, SourceLink
 from .event_memory import EventMemoryComparison, EventMemoryRecord
 from .models import Article
 from .source_quality import assess_article_source
@@ -82,6 +82,19 @@ class LlmBriefingEstimate:
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class LlmBriefingRunData:
+    source_run_dir: str
+    run_date: str
+    records: tuple[EventMemoryRecord, ...]
+    clusters: tuple[DedupeCluster, ...]
+    comparison: EventMemoryComparison
+
+
+class LlmBriefingArtifactError(ValueError):
+    """Raised when prior-run artifacts cannot produce briefing packets."""
 
 
 class LlmBriefingClient(Protocol):
@@ -262,6 +275,7 @@ def build_llm_briefing_input(
         )
     packets.sort(key=_packet_sort_key)
     bounded_packets = packets[: max(1, int(max_event_packets))]
+    ticker_packets = _build_ticker_packets(bounded_packets)
     return {
         "briefing_type": "portfolio_watchlist_market_intelligence",
         "run_date": run_date,
@@ -295,7 +309,81 @@ def build_llm_briefing_input(
         "event_packet_count": len(bounded_packets),
         "event_packets_truncated": len(packets) > len(bounded_packets),
         "event_packets": bounded_packets,
+        "ticker_packet_count": len(ticker_packets),
+        "ticker_packets": ticker_packets,
     }
+
+
+def load_llm_briefing_run(run_dir: str | Path) -> LlmBriefingRunData:
+    directory = Path(run_dir)
+    if not directory.is_dir():
+        raise LlmBriefingArtifactError(
+            f"LLM briefing source run directory not found: {directory}"
+        )
+    event_path = directory / "event_memory_daily.json"
+    rows = _read_json_list(event_path, label="event memory")
+    if not rows:
+        raise LlmBriefingArtifactError(
+            f"LLM briefing source run has no event records: {directory}"
+        )
+    try:
+        records = tuple(
+            EventMemoryRecord(
+                **{
+                    field_name: row.get(field_name)
+                    for field_name in EventMemoryRecord.__dataclass_fields__
+                }
+            )
+            for row in rows
+        )
+    except (TypeError, ValueError) as exc:
+        raise LlmBriefingArtifactError(
+            f"LLM briefing event memory is invalid: {event_path}"
+        ) from exc
+
+    clusters = _load_artifact_clusters(
+        directory / "dedupe_clusters.json",
+        records,
+    )
+    comparison = _load_artifact_comparison(
+        directory / "event_memory_comparison.json",
+        records,
+    )
+    run_date = str(records[0].run_date or directory.name)
+    return LlmBriefingRunData(
+        source_run_dir=str(directory),
+        run_date=run_date,
+        records=records,
+        clusters=clusters,
+        comparison=comparison,
+    )
+
+
+def find_latest_populated_llm_run(
+    artifacts_dir: str | Path,
+) -> Path:
+    base = Path(artifacts_dir)
+    runs_dir = base if base.name == "runs" else base / "runs"
+    if not runs_dir.is_dir():
+        raise LlmBriefingArtifactError(
+            f"No populated LLM briefing run found under: {runs_dir}"
+        )
+    candidates = sorted(
+        (path for path in runs_dir.iterdir() if path.is_dir()),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for candidate in candidates:
+        event_path = candidate / "event_memory_daily.json"
+        try:
+            rows = _read_json_list(event_path, label="event memory")
+        except LlmBriefingArtifactError:
+            continue
+        if rows:
+            return candidate
+    raise LlmBriefingArtifactError(
+        f"No populated LLM briefing run found under: {runs_dir}"
+    )
 
 
 def estimate_llm_briefing_cost(
@@ -537,3 +625,324 @@ def _packet_sort_key(packet: Mapping[str, object]) -> tuple[object, ...]:
         str(packet.get("ticker") or ""),
         str((packet.get("top_titles") or [""])[0]),
     )
+
+
+def _build_ticker_packets(
+    event_packets: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[tuple[int, Mapping[str, object]]]] = {}
+    for index, packet in enumerate(event_packets):
+        ticker = str(packet.get("ticker") or "").upper()
+        if ticker:
+            grouped.setdefault(ticker, []).append((index, packet))
+    ticker_packets = []
+    for ticker, indexed_packets in sorted(grouped.items()):
+        first = indexed_packets[0][1]
+        sentiments = [
+            float(packet.get("sentiment_score") or 0.0)
+            for _, packet in indexed_packets
+        ]
+        statuses = [
+            str(packet.get("new_repeated_status") or "")
+            for _, packet in indexed_packets
+        ]
+        ticker_packets.append(
+            {
+                "ticker": ticker,
+                "company": str(first.get("company") or ticker),
+                "portfolio_watchlist_status": str(
+                    first.get("portfolio_watchlist_status") or "untracked"
+                ),
+                "event_packet_indexes": [
+                    index for index, _ in indexed_packets
+                ],
+                "event_count": len(indexed_packets),
+                "new_event_count": statuses.count("likely_new_event"),
+                "repeated_event_count": sum(
+                    status
+                    in {"exact_url_repeat", "fuzzy_event_repeat"}
+                    for status in statuses
+                ),
+                "average_sentiment": round(
+                    sum(sentiments) / len(sentiments),
+                    4,
+                ),
+                "sentiment_change": first.get("sentiment_change"),
+            }
+        )
+    return ticker_packets
+
+
+def _read_json_list(path: Path, *, label: str) -> list[Mapping[str, object]]:
+    if not path.is_file():
+        raise LlmBriefingArtifactError(
+            f"Required {label} artifact is missing: {path}"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LlmBriefingArtifactError(
+            f"Required {label} artifact is unreadable: {path}"
+        ) from exc
+    if not isinstance(payload, list) or not all(
+        isinstance(row, Mapping) for row in payload
+    ):
+        raise LlmBriefingArtifactError(
+            f"Required {label} artifact must be a JSON array: {path}"
+        )
+    return payload
+
+
+def _read_json_object(
+    path: Path,
+    *,
+    label: str,
+) -> Mapping[str, object]:
+    if not path.is_file():
+        raise LlmBriefingArtifactError(
+            f"Required {label} artifact is missing: {path}"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LlmBriefingArtifactError(
+            f"Required {label} artifact is unreadable: {path}"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise LlmBriefingArtifactError(
+            f"Required {label} artifact must be a JSON object: {path}"
+        )
+    return payload
+
+
+def _load_artifact_clusters(
+    path: Path,
+    records: Sequence[EventMemoryRecord],
+) -> tuple[DedupeCluster, ...]:
+    if not path.is_file():
+        return ()
+    payload = _read_json_object(path, label="dedupe cluster")
+    rows = payload.get("clusters")
+    if not isinstance(rows, list):
+        return ()
+    record_by_cluster = {
+        record.cluster_id: record
+        for record in records
+        if record.cluster_id
+    }
+    clusters = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        cluster_id = str(row.get("cluster_id") or "")
+        record = record_by_cluster.get(cluster_id)
+        title = str(
+            row.get("title")
+            or (record.event_title if record else "")
+        ).strip()
+        canonical_url = str(
+            row.get("canonical_url")
+            or (record.canonical_url if record else "")
+        ).strip()
+        if not title or not canonical_url:
+            continue
+        publisher_names = tuple(
+            str(value)
+            for value in (row.get("publisher_names") or ())
+            if value
+        )
+        source_providers = tuple(
+            str(value)
+            for value in (row.get("source_providers") or ())
+            if value
+        )
+        metadata = {
+            "source_name": (
+                publisher_names[0]
+                if publisher_names
+                else (record.source_provider if record else "")
+            ),
+            "provider": (
+                record.source_provider
+                if record
+                else (source_providers[0] if source_providers else "")
+            ),
+            "source_family": (
+                record.source_family if record else "unknown"
+            ),
+        }
+        article = Article(
+            canonical_url=canonical_url,
+            title=title,
+            published_at=(
+                record.published_at
+                if record
+                else _optional_text(row.get("primary_published_at"))
+            ),
+            metadata=metadata,
+        )
+        supporting_links = tuple(
+            SourceLink(
+                title=str(link.get("title") or ""),
+                url=str(link.get("url") or ""),
+                publisher=_optional_text(link.get("publisher")),
+                provider=_optional_text(link.get("provider")),
+                published_at=_optional_text(link.get("published_at")),
+            )
+            for link in (row.get("supporting_links") or ())
+            if isinstance(link, Mapping)
+            and link.get("title")
+            and link.get("url")
+        )
+        clusters.append(
+            DedupeCluster(
+                canonical_article=article,
+                alternate_source_links=tuple(
+                    str(value)
+                    for value in (row.get("alternate_source_links") or ())
+                    if value
+                ),
+                articles=(article,),
+                duplicate_reasons=tuple(
+                    str(value)
+                    for value in (row.get("duplicate_reasons") or ())
+                    if value
+                ),
+                primary_link=str(row.get("primary_link") or canonical_url),
+                supporting_links=supporting_links,
+                publisher_count=int(row.get("publisher_count") or 1),
+                source_count=int(row.get("source_count") or 1),
+                publisher_names=publisher_names,
+                source_providers=source_providers,
+                cluster_id=cluster_id,
+                primary_ticker=_optional_text(row.get("primary_ticker")),
+                matched_tickers=tuple(
+                    str(value)
+                    for value in (row.get("matched_tickers") or ())
+                    if value
+                ),
+                related_tickers=tuple(
+                    str(value)
+                    for value in (row.get("related_tickers") or ())
+                    if value
+                ),
+                event_type=str(row.get("event_type") or "unknown"),
+                primary_article_id=str(
+                    row.get("primary_article_id") or ""
+                ),
+                supporting_article_ids=tuple(
+                    str(value)
+                    for value in (
+                        row.get("supporting_article_ids") or ()
+                    )
+                    if value
+                ),
+                supporting_publishers=tuple(
+                    str(value)
+                    for value in (
+                        row.get("supporting_publishers") or ()
+                    )
+                    if value
+                ),
+                source_diversity=int(row.get("source_diversity") or 0),
+                publisher_diversity=int(
+                    row.get("publisher_diversity") or 0
+                ),
+            )
+        )
+    return tuple(clusters)
+
+
+def _load_artifact_comparison(
+    path: Path,
+    records: Sequence[EventMemoryRecord],
+) -> EventMemoryComparison:
+    if not path.is_file():
+        return _history_building_comparison(records)
+    payload = _read_json_object(path, label="event memory comparison")
+    matches = payload.get("event_identity_matches")
+    if not isinstance(matches, list):
+        matches = []
+    return EventMemoryComparison(
+        prior_run_available=bool(payload.get("prior_run_available")),
+        history_status=str(
+            payload.get("history_status") or "history_building"
+        ),
+        prior_run_id=_optional_text(payload.get("prior_run_id")),
+        prior_run_date=_optional_text(payload.get("prior_run_date")),
+        event_memory_lookback_days=int(
+            payload.get("event_memory_lookback_days") or 3
+        ),
+        prior_runs_considered=tuple(
+            row
+            for row in (payload.get("prior_runs_considered") or ())
+            if isinstance(row, Mapping)
+        ),
+        prior_event_records_considered=int(
+            payload.get("prior_event_records_considered") or 0
+        ),
+        new_events_since_prior_run=int(
+            payload.get("new_events_since_prior_run") or 0
+        ),
+        repeated_events_from_prior_run=int(
+            payload.get("repeated_events_from_prior_run") or 0
+        ),
+        exact_repeated_events_from_prior_run=int(
+            payload.get("exact_repeated_events_from_prior_run") or 0
+        ),
+        fuzzy_repeated_events_from_prior_run=int(
+            payload.get("fuzzy_repeated_events_from_prior_run") or 0
+        ),
+        event_identity_method_counts=dict(
+            payload.get("event_identity_method_counts") or {}
+        ),
+        event_similarity_threshold=float(
+            payload.get("event_similarity_threshold") or 0.75
+        ),
+        event_identity_matches=tuple(
+            row for row in matches if isinstance(row, Mapping)
+        ),
+        sentiment_change_since_prior_run=dict(
+            payload.get("sentiment_change_since_prior_run") or {}
+        ),
+    )
+
+
+def _history_building_comparison(
+    records: Sequence[EventMemoryRecord],
+) -> EventMemoryComparison:
+    matches = tuple(
+        {
+            "category": "history_building",
+            "current_record_index": index,
+            "ticker": record.ticker,
+            "title_similarity": 0.0,
+        }
+        for index, record in enumerate(records)
+    )
+    return EventMemoryComparison(
+        prior_run_available=False,
+        history_status="history_building",
+        prior_run_id=None,
+        prior_run_date=None,
+        event_memory_lookback_days=3,
+        prior_runs_considered=(),
+        prior_event_records_considered=0,
+        new_events_since_prior_run=0,
+        repeated_events_from_prior_run=0,
+        exact_repeated_events_from_prior_run=0,
+        fuzzy_repeated_events_from_prior_run=0,
+        event_identity_method_counts={
+            "exact_url_repeat": 0,
+            "fuzzy_event_repeat": 0,
+            "likely_new_event": 0,
+        },
+        event_similarity_threshold=0.75,
+        event_identity_matches=matches,
+        sentiment_change_since_prior_run={},
+    )
+
+
+def _optional_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None

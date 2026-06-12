@@ -66,12 +66,15 @@ from .event_memory import (
 from .llm_briefing import (
     DEFAULT_LLM_BRIEFING_TIER,
     LLM_BRIEFING_TIERS,
+    LlmBriefingArtifactError,
     LlmBriefingClient,
     OpenAIResponsesClient,
     briefing_response_schema,
     build_llm_briefing_input,
     estimate_llm_briefing_cost,
+    find_latest_populated_llm_run,
     get_llm_briefing_tier,
+    load_llm_briefing_run,
     write_llm_briefing_artifacts,
 )
 from .models import Article, ArticleSource, RunResult, SentimentResult, TickerMention
@@ -237,6 +240,18 @@ def main(
         environ=runtime_environ,
         dotenv_status=dotenv_status,
     )
+
+    if args.command == "dry-run-daily" and (
+        args.llm_briefing_from_run
+        or args.llm_briefing_from_latest_populated_run
+    ):
+        return _run_llm_briefing_from_existing_run(
+            args,
+            output_dir=output_dir,
+            context=context,
+            environ=runtime_environ,
+            client=llm_client,
+        )
 
     if args.command == "calibrate-event-matching":
         input_path = (
@@ -1184,6 +1199,12 @@ def _add_live_rss_args(
         action="store_true",
         default=False,
     )
+    parser.add_argument("--llm-briefing-from-run")
+    parser.add_argument(
+        "--llm-briefing-from-latest-populated-run",
+        action="store_true",
+        default=False,
+    )
     parser.add_argument("--max-email-stories", type=int, default=DEFAULT_MAX_EMAIL_STORIES)
     parser.add_argument(
         "--max-ranked-reads-per-ticker",
@@ -1311,6 +1332,16 @@ def _safe_context(
         ),
         "llm_call_confirmed": bool(
             getattr(args, "llm_confirm_call", False)
+        ),
+        "llm_briefing_from_run": str(
+            getattr(args, "llm_briefing_from_run", "") or ""
+        ),
+        "llm_briefing_from_latest_populated_run": bool(
+            getattr(
+                args,
+                "llm_briefing_from_latest_populated_run",
+                False,
+            )
         ),
         "live_rss_enabled": bool(getattr(args, "enable_live_rss", False)),
         "live_article_fetch_enabled": bool(getattr(args, "enable_live_article_fetch", False)),
@@ -2029,6 +2060,9 @@ def _run_llm_briefing_stage(
     comparison: EventMemoryComparison,
     environ: Mapping[str, str],
     client: LlmBriefingClient | None,
+    input_source_run: str | None = None,
+    force_estimate_only: bool = False,
+    briefing_run_date: str | None = None,
 ) -> dict[str, object]:
     enabled = bool(getattr(args, "enable_llm_briefing", False))
     tier_name = str(
@@ -2052,11 +2086,14 @@ def _run_llm_briefing_stage(
         records=records,
         clusters=clusters,
         comparison=comparison,
-        run_date=args.run_date,
+        run_date=briefing_run_date or args.run_date,
         tier=tier,
     )
     estimate = estimate_llm_briefing_cost(input_payload, tier)
-    estimate_only = bool(getattr(args, "llm_estimate_cost_only", False))
+    estimate_only = (
+        bool(getattr(args, "llm_estimate_cost_only", False))
+        or force_estimate_only
+    )
     confirmed = bool(getattr(args, "llm_confirm_call", False))
     status = "confirmation_required"
     call_attempted = False
@@ -2101,6 +2138,8 @@ def _run_llm_briefing_stage(
         "tier": tier.as_dict(),
         "estimate": estimate.as_dict(),
         "event_packet_count": input_payload["event_packet_count"],
+        "ticker_packet_count": input_payload["ticker_packet_count"],
+        "input_source_run": input_source_run,
         "event_packets_truncated": input_payload[
             "event_packets_truncated"
         ],
@@ -2124,17 +2163,27 @@ def _run_llm_briefing_stage(
         "llm_briefing_event_packet_count": input_payload[
             "event_packet_count"
         ],
+        "llm_event_packet_count": input_payload["event_packet_count"],
+        "llm_briefing_ticker_packet_count": input_payload[
+            "ticker_packet_count"
+        ],
+        "llm_ticker_packet_count": input_payload["ticker_packet_count"],
+        "llm_input_source_run": input_source_run,
         "llm_briefing_event_packets_truncated": input_payload[
             "event_packets_truncated"
         ],
         "llm_briefing_estimated_input_tokens": (
             estimate.estimated_input_tokens
         ),
+        "llm_estimated_input_tokens": estimate.estimated_input_tokens,
         "llm_briefing_reserved_output_tokens": (
             estimate.reserved_output_tokens
         ),
+        "llm_estimated_output_tokens": estimate.reserved_output_tokens,
         "llm_briefing_estimated_cost_usd": estimate.estimated_cost_usd,
+        "llm_estimated_cost_usd": estimate.estimated_cost_usd,
         "llm_briefing_cost_cap_usd": estimate.cost_cap_usd,
+        "llm_cost_cap_usd": estimate.cost_cap_usd,
         "llm_briefing_blocked_reason": blocked_reason,
         "llm_briefing_call_attempted": call_attempted,
         "llm_briefing_call_completed": call_completed,
@@ -2142,6 +2191,78 @@ def _run_llm_briefing_stage(
         "llm_briefing_preview": preview_path,
         "llm_briefing_output": output_path,
     }
+
+
+def _run_llm_briefing_from_existing_run(
+    args: argparse.Namespace,
+    *,
+    output_dir: Path,
+    context: Mapping[str, object],
+    environ: Mapping[str, str],
+    client: LlmBriefingClient | None,
+) -> int:
+    if not args.enable_llm_briefing:
+        _print_json(
+            {
+                **context,
+                "status": "error",
+                "reason": "enable_llm_briefing_required",
+            }
+        )
+        return 2
+    if (
+        args.llm_briefing_from_run
+        and args.llm_briefing_from_latest_populated_run
+    ):
+        _print_json(
+            {
+                **context,
+                "status": "error",
+                "reason": (
+                    "choose_only_one_llm_briefing_source_run_option"
+                ),
+            }
+        )
+        return 2
+    try:
+        source_run = (
+            Path(args.llm_briefing_from_run)
+            if args.llm_briefing_from_run
+            else find_latest_populated_llm_run(args.artifacts_dir)
+        )
+        run_data = load_llm_briefing_run(source_run)
+    except LlmBriefingArtifactError as exc:
+        _print_json(
+            {
+                **context,
+                "status": "error",
+                "reason": str(exc),
+            }
+        )
+        return 2
+
+    diagnostics = _run_llm_briefing_stage(
+        args,
+        output_dir=output_dir,
+        records=run_data.records,
+        clusters=run_data.clusters,
+        comparison=run_data.comparison,
+        environ=environ,
+        client=client,
+        input_source_run=run_data.source_run_dir,
+        force_estimate_only=not bool(args.llm_confirm_call),
+        briefing_run_date=run_data.run_date,
+    )
+    payload = {
+        **context,
+        "status": "llm_briefing_preview_complete",
+        "source_run_date": run_data.run_date,
+        "email_sending": "not_invoked",
+        **diagnostics,
+    }
+    _write_json(output_dir / "llm_briefing_replay.json", payload)
+    _print_json(payload)
+    return 0
 
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> str:

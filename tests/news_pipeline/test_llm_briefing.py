@@ -303,6 +303,96 @@ class LlmBriefingTests(unittest.TestCase):
         self.assertEqual(premium_args.llm_briefing_tier, "premium")
         self.assertEqual(EVENT_SIMILARITY_THRESHOLD, 0.75)
 
+    def test_loads_llm_briefing_from_prior_populated_run(self):
+        client = CountingLlmClient()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_run = _write_populated_run(
+                Path(temp_dir) / "artifacts" / "runs" / "2026-06-10"
+            )
+            payload, output_dir, stdout, exit_code = _invoke_dry_run(
+                temp_dir,
+                extra_args=[
+                    "--enable-llm-briefing",
+                    "--llm-briefing-from-run",
+                    str(source_run),
+                ],
+                environ={"OPENAI_API_KEY": "unused-test-key"},
+                client=client,
+            )
+            input_text = (
+                output_dir / "llm_briefing_input.json"
+            ).read_text(encoding="utf-8")
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                payload["status"],
+                "llm_briefing_preview_complete",
+            )
+            self.assertEqual(payload["llm_briefing_status"], "estimate_only")
+            self.assertEqual(payload["llm_event_packet_count"], 1)
+            self.assertEqual(payload["llm_ticker_packet_count"], 1)
+            self.assertEqual(
+                payload["llm_input_source_run"],
+                str(source_run),
+            )
+            self.assertGreater(payload["llm_estimated_input_tokens"], 0)
+            self.assertEqual(payload["llm_estimated_output_tokens"], 5_000)
+            self.assertLessEqual(
+                payload["llm_estimated_cost_usd"],
+                payload["llm_cost_cap_usd"],
+            )
+            self.assertEqual(payload["email_sending"], "not_invoked")
+            self.assertEqual(client.call_count, 0)
+            self.assertTrue(
+                (output_dir / "llm_briefing_preview.json").exists()
+            )
+            self.assertNotIn("raw body must stay outside packet", input_text)
+            self.assertNotIn("unused-test-key", input_text)
+            self.assertNotIn("unused-test-key", stdout)
+
+    def test_latest_populated_run_skips_newer_empty_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runs_dir = Path(temp_dir) / "artifacts" / "runs"
+            source_run = _write_populated_run(runs_dir / "2026-06-10")
+            empty_run = runs_dir / "2026-06-11"
+            empty_run.mkdir(parents=True)
+            (empty_run / "event_memory_daily.json").write_text(
+                "[]",
+                encoding="utf-8",
+            )
+
+            payload, _output_dir, _stdout, exit_code = _invoke_dry_run(
+                temp_dir,
+                extra_args=[
+                    "--enable-llm-briefing",
+                    "--llm-briefing-from-latest-populated-run",
+                ],
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                payload["llm_input_source_run"],
+                str(source_run),
+            )
+            self.assertEqual(payload["llm_event_packet_count"], 1)
+
+    def test_latest_populated_run_fails_clearly_when_none_exists(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload, _output_dir, _stdout, exit_code = _invoke_dry_run(
+                temp_dir,
+                extra_args=[
+                    "--enable-llm-briefing",
+                    "--llm-briefing-from-latest-populated-run",
+                ],
+            )
+
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn(
+                "No populated LLM briefing run found",
+                payload["reason"],
+            )
+
 
 def _record() -> EventMemoryRecord:
     title = "NVIDIA launches a new AI data center platform"
@@ -355,6 +445,24 @@ def _run_dry_run(
     environ=None,
     client=None,
 ):
+    payload, output_dir, stdout, exit_code = _invoke_dry_run(
+        temp_dir,
+        extra_args=extra_args,
+        environ=environ,
+        client=client,
+    )
+    if exit_code != 0:
+        raise AssertionError(stdout)
+    return payload, output_dir, stdout
+
+
+def _invoke_dry_run(
+    temp_dir,
+    *,
+    extra_args=None,
+    environ=None,
+    client=None,
+):
     argv = [
         "dry-run-daily",
         "--run-date",
@@ -371,10 +479,122 @@ def _run_dry_run(
             environ=environ or {},
             llm_client=client,
         )
-    if exit_code != 0:
-        raise AssertionError(stdout.getvalue())
     payload = json.loads(stdout.getvalue())
-    return payload, Path(payload["output_dir"]), stdout.getvalue()
+    return (
+        payload,
+        Path(payload["output_dir"]),
+        stdout.getvalue(),
+        exit_code,
+    )
+
+
+def _write_populated_run(run_dir: Path) -> Path:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    record = replace(
+        _record(),
+        cluster_id="cluster-nvda",
+        run_id=f"run-{run_dir.name}",
+        run_date=run_dir.name,
+    )
+    (run_dir / "event_memory_daily.json").write_text(
+        json.dumps([record.as_dict()], indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "event_memory_comparison.json").write_text(
+        json.dumps(
+            {
+                "prior_run_available": True,
+                "history_status": "compared_to_prior_run",
+                "prior_run_id": "prior-run",
+                "prior_run_date": "2026-06-09",
+                "event_memory_lookback_days": 3,
+                "prior_runs_considered": [
+                    {
+                        "run_id": "prior-run",
+                        "run_date": "2026-06-09",
+                    }
+                ],
+                "prior_event_records_considered": 1,
+                "new_events_since_prior_run": 1,
+                "repeated_events_from_prior_run": 0,
+                "exact_repeated_events_from_prior_run": 0,
+                "fuzzy_repeated_events_from_prior_run": 0,
+                "event_identity_method_counts": {
+                    "exact_url_repeat": 0,
+                    "fuzzy_event_repeat": 0,
+                    "likely_new_event": 1,
+                },
+                "event_similarity_threshold": 0.75,
+                "event_identity_matches": [
+                    {
+                        "category": "likely_new_event",
+                        "current_record_index": 0,
+                        "ticker": "NVDA",
+                        "title_similarity": 0.0,
+                    }
+                ],
+                "sentiment_change_since_prior_run": {
+                    "NVDA": {
+                        "prior": 0.1,
+                        "current": 0.4,
+                        "change": 0.3,
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "dedupe_clusters.json").write_text(
+        json.dumps(
+            {
+                "cluster_count": 1,
+                "clusters": [
+                    {
+                        "canonical_url": record.canonical_url,
+                        "title": record.event_title,
+                        "primary_link": record.canonical_url,
+                        "cluster_id": record.cluster_id,
+                        "publisher_count": 1,
+                        "source_count": 1,
+                        "publisher_names": ["Reuters"],
+                        "source_providers": ["example"],
+                        "supporting_links": [],
+                        "alternate_source_links": [],
+                        "duplicate_reasons": [],
+                        "primary_ticker": "NVDA",
+                        "matched_tickers": ["NVDA"],
+                        "related_tickers": [],
+                        "event_type": record.event_type,
+                        "primary_article_id": record.article_id,
+                        "supporting_article_ids": [],
+                        "supporting_publishers": [],
+                        "source_diversity": 1,
+                        "publisher_diversity": 1,
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "collected_articles.json").write_text(
+        json.dumps(
+            {
+                "articles": [
+                    {
+                        "canonical_url": record.canonical_url,
+                        "title": record.event_title,
+                        "full_text": (
+                            "raw body must stay outside packet"
+                        ),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return run_dir
 
 
 if __name__ == "__main__":
